@@ -1,0 +1,20 @@
+mcu_bridge:
+  ros__parameters:
+    backend: dummy            # serial (Arduino / custom ESC) | gpio (Pi only) | dummy (no hardware)
+    steering_only: true       # speed forced to 0. Set false only when you're ready to spin the wheels
+    max_steering_deg: 15.0    # clamp on what reactive_node can ask for; raise after calibrating
+    max_speed: 0.5            # m/s hard cap. gap_params.yaml speed_max (15.0) is a sim value
+    odom_mode: commanded      # measured (needs wheel sensor telemetry) | commanded
+
+    # serial backend
+    serial_port: /dev/ttyACM0 # better: /dev/serial/by-id/<your board>
+    serial_baud: 115200
+
+    # gpio backend (Pi only). GPIO18 = header pin 12. These are PLACEHOLDERS: measure your servo.
+    steer_gpio: 18
+    throttle_gpio: -1         # -1 = no ESC connected
+    steer_center_us: 1500
+    steer_us_per_deg: 10.0
+    steer_min_us: 1300
+    steer_max_us: 1700
+    steer_sign: 1.0           # flip to -1.0 if + steering goes right

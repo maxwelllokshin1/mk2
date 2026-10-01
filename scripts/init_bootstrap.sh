@@ -1,5 +1,5 @@
 #!/bin/sh
-set -euxo pipefail
+set -eux
 
 # 1) Chown volumes once using sentinel files
 for d in \
@@ -34,26 +34,22 @@ mkdir -p "$DATA"
 if [ -f "$DATA/.racer_libs_seeded" ]; then
   echo "[bootstrap] Sentinel found: $DATA/.racer_libs_seeded — skipping seed"
 else
+  if [ -d "$MOUNT_SEED" ] && [ -n "$(ls -A "$MOUNT_SEED" 2>/dev/null)" ]; then
+    SEED_SRC="$MOUNT_SEED"
+    echo "[bootstrap] Using mounted seed: $SEED_SRC"
+  elif [ -d "$BAKED_SEED" ] && [ -n "$(ls -A "$BAKED_SEED" 2>/dev/null)" ]; then
+    SEED_SRC="$BAKED_SEED"
+    echo "[bootstrap] Mounted /seed empty or missing; using baked fallback: $SEED_SRC"
+  else
+    echo "[bootstrap] ERROR: No valid seed found. Checked: $MOUNT_SEED and $BAKED_SEED"
+    exit 1
+  fi
+
+  echo "[bootstrap] Copying from $SEED_SRC to $DATA"
+  cp -a "$SEED_SRC"/. "$DATA"/
+  chown -R 1000:1000 "$DATA"
   echo "seeded_from=$SEED_SRC" > "$DATA/.racer_libs_seeded"
-  exit 0
 fi
-
-if [ -d "$MOUNT_SEED" ] && [ -n "$(ls -A "$MOUNT_SEED" 2>/dev/null)" ]; then
-  SEED_SRC="$MOUNT_SEED"
-  echo "[bootstrap] Using mounted seed: $SEED_SRC"
-elif [ -d "$BAKED_SEED" ] && [ -n "$(ls -A "$BAKED_SEED" 2>/dev/null)" ]; then
-  SEED_SRC="$BAKED_SEED"
-  echo "[bootstrap] Mounted /seed empty or missing; using baked fallback: $SEED_SRC"
-else
-  echo "[bootstrap] ERROR: No valid seed found. Checked: $MOUNT_SEED and $BAKED_SEED"
-  exit 1
-fi
-
-echo "[bootstrap] Copying from $SEED_SRC to $DATA"
-cp -a "$SEED_SRC"/. "$DATA"/
-
-echo "[bootstrap] Setting ownership to 1000:1000 on $DATA"
-chown -R 1000:1000 "$DATA"
 
 # 3) Clone f1tenth_gym_ros if missing
 GYM_DIR=/home/ubuntu/ros2_workspaces/src/f1tenth_gym_ros
@@ -62,8 +58,6 @@ if [ ! -d "$GYM_DIR" ] || [ -z "$(ls -A "$GYM_DIR" 2>/dev/null)" ]; then
     git clone https://github.com/f1tenth/f1tenth_gym_ros.git "$GYM_DIR"
 fi
 chown -R 1000:1000 "$GYM_DIR"
-
-echo "[bootstrap] Completed successfully"
 
 
 # 4) Seed maps into f1tenth_gym_ros/maps once
@@ -112,7 +106,5 @@ if [ -f "$SIM_YAML" ] && [ ! -f "$SIM_SENTINEL" ]; then
     touch "$SIM_SENTINEL"
     chown 1000:1000 "$SIM_YAML" "$SIM_SENTINEL"
 fi
-
-echo "seeded_from=$SEED_SRC" > "$DATA/.racer_libs_seeded"
 
 echo "[bootstrap] Completed successfully"

@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>mcu_bridge</name>
+  <version>0.0.0</version>
+  <description>Bridge from /drive to a serial MCU (Arduino / custom ESC) or the Pi's own GPIO</description>
+  <maintainer email="maxwell.lokshin@2zick.com">ubuntu</maintainer>
+  <license>TODO: License declaration</license>
+
+  <depend>rclpy</depend>
+  <depend>ackermann_msgs</depend>
+  <depend>nav_msgs</depend>
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>follow_the_gap</exec_depend>
+  <exec_depend>urg_node2</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

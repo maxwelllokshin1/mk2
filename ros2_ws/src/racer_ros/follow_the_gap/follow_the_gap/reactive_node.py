@@ -19,61 +19,82 @@ class ReactiveFollowGap(Node):
         self.declare_parameter('steering_gain', 1.0) # proportional gain
         self.declare_parameter('max_steering', 30.0) # proportional gain
 
-        # ── steering low-pass (dynamic alpha) ──
+        # ////// steering low-pass (dynamic alpha) \\\\\\\\\
         self.declare_parameter('alpha_straight', 0.8) # heavy smoothing when the target angle is small
-        self.declare_parameter('alpha_curve', 0.35) # light smoothing when the target angle is large — reacts fast
+        self.declare_parameter('alpha_curve', 0.35) # light smoothing when the target angle is large -> reacts fast
 
-        # ── how far around bends the car can "see" and react to ──
-        self.declare_parameter('fov_deg', 70.0) # degrees, EACH side of center (was hardcoded 100 — wide enough to see through bends and start turning toward them early)
-        self.declare_parameter('gap_aim_aggressiveness', 0.5) # 0 = always aim at the gap's center (immediate corridor); 1 = original behavior (aim at the furthest visible point, which is often down the next corridor segment on a bend)
+        # ////// how far around bends the car can see and react to \\\\\\
+        self.declare_parameter('fov_deg', 70.0) # degrees, EACH side of center
+        self.declare_parameter('gap_aim_aggressiveness', 0.5) # 0 = always aim at the gap's center | 1 = aim at the furthest visible point
 
-        # ── straightaway detection (predictive lookahead) ──
-        # fraction of max_lidar_range, not an absolute meters value — ranges
-        # are clipped to max_lidar_range in preprocess_lidar(), so an
-        # absolute threshold above max_lidar_range would be unsatisfiable
-        # and silently disable straight mode entirely
+        # ///// straightaway detection (predictive lookahead) \\\\\
         self.declare_parameter('straight_min_forward_frac', 0.75)
         self.declare_parameter('straight_max_angle_deg', 6.0) # steering EMA must be under this to count as "open"
         self.declare_parameter('straight_ema_alpha', 0.2) # smoothing on the steering-magnitude EMA (higher = reacts faster)
 
-        # ── lap tracking ──
-        self.declare_parameter('lap_leave_dist', 3.0) # meters — must get this far from start before a lap can arm
-        self.declare_parameter('lap_return_dist', 1.5) # meters — within this counts as crossing the line
-        self.declare_parameter('lap_min_time', 5.0) # seconds — guards against re-triggering on the same crossing
+        # ///// lap tracking!!!! \\\\\\
+        self.declare_parameter('lap_leave_dist', 3.0) # meters: must get this far from start before a lap can arm
+        self.declare_parameter('lap_return_dist', 1.5) # meters: within this counts as crossing the line
+        self.declare_parameter('lap_min_time', 5.0) # seconds: guards against re-triggering on the same crossing
 
-        # ── dashboard lidar view / predicted path ──
-        self.declare_parameter('wheelbase', 0.25) # meters — matches f1tenth_stack/config/vesc.yaml
+        #  /////// dashboard lidar view / predicted path \\\\\\\\\\
+        self.declare_parameter('wheelbase', 0.25) # meters
         self.declare_parameter('lidar_view_every_n', 10) # publish /lidar_view every Nth scan (throttle)
 
-        # ── recovery (backing out after getting stuck) ──
-        self.declare_parameter('recovery_straight_time', 0.8) # seconds — reverse straight first, before steering, to get clear of the wall
-        self.declare_parameter('recovery_clear_dist', 1.0) # meters — average space needed on BOTH sides to call it clear
-        self.declare_parameter('recovery_max_time', 6.0) # seconds — safety cap so it can never reverse forever
+        # ////////// recovery (backing out after getting stuck) \\\\\\\\
+        self.declare_parameter('recovery_straight_time', 0.8) 
+        self.declare_parameter('recovery_clear_dist', 1.0) 
+        self.declare_parameter('recovery_max_time', 6.0) 
 
-        # ////////// get parameters (just retrieving what was previously declared) \\\\\\\\\
-        self.bubble_radius = self.get_parameter('bubble_radius').value
+        # /////// dynamic track-scale adaptation \\\\\\\\
+        self.declare_parameter('enable_dynamic_scaling', True)
+        self.declare_parameter('lidar_hw_range_m', 10.0)
+        self.declare_parameter('reference_corridor_m', 2.0) 
+        self.declare_parameter('min_track_scale', 0.4) 
+        self.declare_parameter('max_track_scale', 1.8) 
+        self.declare_parameter('track_scale_ema_alpha', 0.05) 
+
+        # ////////// get parameters \\\\\\\\\
+        self.bubble_radius_base = self.get_parameter('bubble_radius').value
+        self.bubble_radius = self.bubble_radius_base
         self.preprocess_conv_size = self.get_parameter('preprocess_conv_size').value
-        self.max_lidar_range = self.get_parameter('max_lidar_range').value
-        self.speed_max = self.get_parameter('speed_max').value
+        self.max_lidar_range_base = self.get_parameter('max_lidar_range').value
+        self.max_lidar_range = self.max_lidar_range_base
+        self.speed_max_base = self.get_parameter('speed_max').value
+        self.speed_max = self.speed_max_base
         self.steering_gain = self.get_parameter('steering_gain').value
         self.current_speed = 0.0
         self.max_steering = np.deg2rad(self.get_parameter('max_steering').value)
         self.alpha_straight = self.get_parameter('alpha_straight').value
         self.alpha_curve = self.get_parameter('alpha_curve').value
-        self.fov = np.deg2rad(self.get_parameter('fov_deg').value) # how much we want the car to see infront of it
+        self.fov_deg_base = self.get_parameter('fov_deg').value
+        self.fov = np.deg2rad(self.fov_deg_base) # how much we want the car to see infront of it
         self.gap_aim_aggressiveness = self.get_parameter('gap_aim_aggressiveness').value
+
+        # dynamic track-scale adaptation
+        self.enable_dynamic_scaling = self.get_parameter('enable_dynamic_scaling').value
+        self.lidar_hw_range_m = self.get_parameter('lidar_hw_range_m').value
+        self.reference_corridor_m = self.get_parameter('reference_corridor_m').value
+        self.min_track_scale = self.get_parameter('min_track_scale').value
+        self.max_track_scale = self.get_parameter('max_track_scale').value
+        self.track_scale_ema_alpha = self.get_parameter('track_scale_ema_alpha').value
+        self.track_scale = None 
         self.prev_steering = 0.0
         self.steering_smoothing = 0.6
         self.recovery_start_time = None
 
+        # predictive lookahead
         self.straight_min_forward_frac = self.get_parameter('straight_min_forward_frac').value
         self.straight_max_angle = np.deg2rad(self.get_parameter('straight_max_angle_deg').value)
         self.straight_ema_alpha = self.get_parameter('straight_ema_alpha').value
         self.straight_angle_ema = 0.0
         self.in_straight_mode = False
 
-        self.lap_leave_dist = self.get_parameter('lap_leave_dist').value
-        self.lap_return_dist = self.get_parameter('lap_return_dist').value
+        # lap tracking!!!!!!
+        self.lap_leave_dist_base = self.get_parameter('lap_leave_dist').value
+        self.lap_leave_dist = self.lap_leave_dist_base
+        self.lap_return_dist_base = self.get_parameter('lap_return_dist').value
+        self.lap_return_dist = self.lap_return_dist_base
         self.lap_min_time = self.get_parameter('lap_min_time').value
         self.start_pos = None
         self.has_left_start = False
@@ -82,12 +103,15 @@ class ReactiveFollowGap(Node):
         self.last_lap_time = 0.0
         self.best_lap_time = None
 
+        # dashboard stuff
         self.wheelbase = self.get_parameter('wheelbase').value
         self.lidar_view_every_n = self.get_parameter('lidar_view_every_n').value
         self.lidar_view_counter = 0
 
+        # recovery
         self.recovery_straight_time = self.get_parameter('recovery_straight_time').value
-        self.recovery_clear_dist = self.get_parameter('recovery_clear_dist').value
+        self.recovery_clear_dist_base = self.get_parameter('recovery_clear_dist').value
+        self.recovery_clear_dist = self.recovery_clear_dist_base
         self.recovery_max_time = self.get_parameter('recovery_max_time').value
         self.recovery_steering = 0.0
         
@@ -117,11 +141,7 @@ class ReactiveFollowGap(Node):
         self.lap_pub = self.create_publisher(Float32MultiArray, '/lap_info', 10)
         self.lidar_view_pub = self.create_publisher(Float32MultiArray, '/lidar_view', 10)
 
-        # dashboard live tuner — setting a parameter through the standard
-        # ROS2 parameter service only updates this node's internal
-        # parameter STORAGE, not the self.xxx attributes read below, which
-        # were only pulled out once at startup. Without this callback the
-        # tuner would report "applied" but silently do nothing.
+        # for the tuner
         self.add_on_set_parameters_callback(self.on_parameter_update)
 
         # ////////// DEBUGGER \\\\\\\\\
@@ -131,25 +151,26 @@ class ReactiveFollowGap(Node):
         self.get_logger().info(f"max speed: {self.speed_max}m/s")
         self.get_logger().info(f"\/"*15)
 
+    
     def odom_callback(self, msg):
+        # get the supposed value
         vx = msg.twist.twist.linear.x
         vy = msg.twist.twist.linear.y
         self.actual_speed = msg.twist.twist.linear.x
 
+        # get the odom value
         pos_x = msg.pose.pose.position.x
         pos_y = msg.pose.pose.position.y
         now = self.get_clock().now()
 
         if self.start_pos is None:
-            # first odom message we've ever seen — treat this pose as the
-            # start/finish line rather than reading it from sim.yaml, so
-            # this works unchanged on real hardware too.
             self.start_pos = (pos_x, pos_y)
             self.lap_start_time = now
             return
 
-        dist_from_start = np.hypot(pos_x - self.start_pos[0], pos_y - self.start_pos[1])
+        dist_from_start = np.hypot(pos_x - self.start_pos[0], pos_y - self.start_pos[1]) # calculated distance from the start
 
+        # used as a way to decide how much time has elapsed since you left the start
         if not self.has_left_start:
             if dist_from_start > self.lap_leave_dist:
                 self.has_left_start = True
@@ -169,7 +190,7 @@ class ReactiveFollowGap(Node):
 
         self._publish_lap_info(now)
 
-    def _publish_lap_info(self, now):
+    def _publish_lap_info(self, now): # lap info
         current_lap_elapsed = 0.0
         if self.lap_start_time is not None:
             current_lap_elapsed = (now - self.lap_start_time).nanoseconds / 1e9
@@ -183,13 +204,7 @@ class ReactiveFollowGap(Node):
         ]
         self.lap_pub.publish(lap_msg)
 
-    def reset_callback(self, msg):
-        # dashboard's Restart button — repositioning the car (via
-        # /initialpose, handled by gym_bridge) doesn't touch any of this
-        # node's own state, so without this a "restart" would still carry
-        # over the old lap count, stuck counter, recovery flags, etc.
-        # start_pos is deliberately NOT cleared — it's the spawn point,
-        # which doesn't change between restarts, so it stays valid.
+    def reset_callback(self, msg): #this will reset all values for tracking
         self.prev_steering = 0.0
         self.current_speed = 0.0
         self.stuck_counter = 0
@@ -203,24 +218,26 @@ class ReactiveFollowGap(Node):
         self.lap_start_time = self.get_clock().now()
         self.last_lap_time = 0.0
         self.best_lap_time = None
+        self.track_scale = None
         self.get_logger().info('State reset (dashboard restart)')
 
-    def on_parameter_update(self, params):
-        # keeps the self.xxx attributes (what the rest of this file
-        # actually reads every frame) in sync with whatever the tuner just
-        # set through the standard ROS2 parameter service. A few of these
-        # are stored pre-converted (degrees -> radians), so this mirrors
-        # the same conversion done for them in __init__.
+    def on_parameter_update(self, params): # everything that is updated with my param tuner dashboard
         for p in params:
             name, value = p.name, p.value
             if name == 'bubble_radius':
-                self.bubble_radius = value
+                self.bubble_radius_base = value
+                if not self.enable_dynamic_scaling:
+                    self.bubble_radius = value
             elif name == 'preprocess_conv_size':
                 self.preprocess_conv_size = value
             elif name == 'max_lidar_range':
-                self.max_lidar_range = value
+                self.max_lidar_range_base = value
+                if not self.enable_dynamic_scaling:
+                    self.max_lidar_range = value
             elif name == 'speed_max':
-                self.speed_max = value
+                self.speed_max_base = value
+                if not self.enable_dynamic_scaling:
+                    self.speed_max = value
             elif name == 'steering_gain':
                 self.steering_gain = value
             elif name == 'max_steering':
@@ -230,7 +247,9 @@ class ReactiveFollowGap(Node):
             elif name == 'alpha_curve':
                 self.alpha_curve = value
             elif name == 'fov_deg':
-                self.fov = np.deg2rad(value)
+                self.fov_deg_base = value
+                if not self.enable_dynamic_scaling:
+                    self.fov = np.deg2rad(value)
             elif name == 'gap_aim_aggressiveness':
                 self.gap_aim_aggressiveness = value
             elif name == 'straight_min_forward_frac':
@@ -240,9 +259,13 @@ class ReactiveFollowGap(Node):
             elif name == 'straight_ema_alpha':
                 self.straight_ema_alpha = value
             elif name == 'lap_leave_dist':
-                self.lap_leave_dist = value
+                self.lap_leave_dist_base = value
+                if not self.enable_dynamic_scaling:
+                    self.lap_leave_dist = value
             elif name == 'lap_return_dist':
-                self.lap_return_dist = value
+                self.lap_return_dist_base = value
+                if not self.enable_dynamic_scaling:
+                    self.lap_return_dist = value
             elif name == 'lap_min_time':
                 self.lap_min_time = value
             elif name == 'wheelbase':
@@ -252,12 +275,80 @@ class ReactiveFollowGap(Node):
             elif name == 'recovery_straight_time':
                 self.recovery_straight_time = value
             elif name == 'recovery_clear_dist':
-                self.recovery_clear_dist = value
+                self.recovery_clear_dist_base = value
+                if not self.enable_dynamic_scaling:
+                    self.recovery_clear_dist = value
             elif name == 'recovery_max_time':
                 self.recovery_max_time = value
+            elif name == 'enable_dynamic_scaling':
+                self.enable_dynamic_scaling = value
+                if not value:
+                    self.bubble_radius = self.bubble_radius_base
+                    self.max_lidar_range = self.max_lidar_range_base
+                    self.speed_max = self.speed_max_base
+                    self.fov = np.deg2rad(self.fov_deg_base)
+                    self.recovery_clear_dist = self.recovery_clear_dist_base
+                    self.lap_leave_dist = self.lap_leave_dist_base
+                    self.lap_return_dist = self.lap_return_dist_base
+            elif name == 'lidar_hw_range_m':
+                self.lidar_hw_range_m = value
+            elif name == 'reference_corridor_m':
+                self.reference_corridor_m = value
+            elif name == 'min_track_scale':
+                self.min_track_scale = value
+            elif name == 'max_track_scale':
+                self.max_track_scale = value
+            elif name == 'track_scale_ema_alpha':
+                self.track_scale_ema_alpha = value
         return SetParametersResult(successful=True)
 
-    def preprocess_lidar(self, ranges):
+    def _update_dynamic_scaling(self, data): # retunes values based on how large track is
+        if not self.enable_dynamic_scaling:
+            return
+
+        ranges = np.nan_to_num(np.array(data.ranges), nan=0.0, posinf=0.0, neginf=0.0)
+        ranges = np.clip(ranges, 0.0, self.lidar_hw_range_m)
+        angles = data.angle_min + np.arange(len(ranges)) * data.angle_increment
+
+        # get the window of ranges from the right and left and check if scan if useful
+        window = np.abs(angles) <= np.pi / 2
+        right = ranges[window & (angles < 0)]
+        left = ranges[window & (angles >= 0)]
+        right = right[right > 0]
+        left = left[left > 0]
+        if len(right) == 0 or len(left) == 0:
+            return  
+
+        corridor_m = float(np.mean(right) + np.mean(left)) # this is how big the track is on both sides
+        if corridor_m < 0.2: # check for sensor glitch
+            return  
+
+        raw_scale = float(np.clip(corridor_m / self.reference_corridor_m, 
+                                   self.min_track_scale, self.max_track_scale)) # this is how much to scale raw
+
+        if self.track_scale is None: # check if there already is a scale otherwise update the track scale based on an alpha value
+            self.track_scale = raw_scale 
+        else:
+            a = self.track_scale_ema_alpha
+            self.track_scale = (1 - a) * self.track_scale + a * raw_scale
+
+        # now finally update lidar range, bubble radius, fov, speed, recovery distance, and lap tracking
+        scale = self.track_scale
+        self.max_lidar_range = float(np.clip(self.max_lidar_range_base * scale, 1.0, self.lidar_hw_range_m))
+        self.bubble_radius = float(np.clip(self.bubble_radius_base * scale, 0.1, 1.5))
+        self.fov = float(np.deg2rad(np.clip(self.fov_deg_base * scale, 30.0, 90.0)))
+        self.speed_max = float(np.clip(self.speed_max_base * scale, 0.3, self.speed_max_base * self.max_track_scale))
+        self.recovery_clear_dist = float(np.clip(self.recovery_clear_dist_base * scale, 0.3, 2.0))
+        self.lap_leave_dist = float(np.clip(self.lap_leave_dist_base * scale, 0.5, 20.0))
+        self.lap_return_dist = float(np.clip(self.lap_return_dist_base * scale, 0.3, 10.0))
+
+        self.get_logger().info(
+            f'[track-scale] corridor~{corridor_m:.2f}m scale={scale:.2f} | '
+            f'bubble={self.bubble_radius:.2f}m range={self.max_lidar_range:.2f}m '
+            f'fov={np.rad2deg(self.fov):.0f}deg speed_max={self.speed_max:.2f}m/s',
+            throttle_duration_sec=2.0)
+
+    def preprocess_lidar(self, ranges): # this is to predict what is ahead of you
         # preprocess the lidar scan array
         
         # 1. set each value to mean over some window
@@ -285,9 +376,14 @@ class ReactiveFollowGap(Node):
         return processed_ranges #TODO: implement preprocessing
 
     
-    def lidar_callback(self, data):
+    def lidar_callback(self, data): # 
         ranges = np.array(data.ranges)
         # ------------------------ {PROCESSING} ------------------------
+
+        # Re-tune bubble_radius / max_lidar_range / fov / speed_max /
+        # recovery_clear_dist / lap_leave_dist / lap_return_dist for the
+        # track we're actually on, BEFORE anything below reads them.
+        self._update_dynamic_scaling(data)
 
         # step 1: preprocess
         processed_ranges = self.preprocess_lidar(ranges) # we want the values to be between 0 and self.max_lidar_range. 
@@ -300,7 +396,7 @@ class ReactiveFollowGap(Node):
         end = min(len(processed_ranges), center_index+beams_per_side)
         processed_ranges = processed_ranges[start:end]
         
-        # TODO: find closest points
+        # find closest points
         
         # whatever value is the smallest
         copied_ranges = processed_ranges.copy() # dont want to make changes to the current ranges
@@ -315,7 +411,7 @@ class ReactiveFollowGap(Node):
         smallest_dist = smallest_dist if smallest_dist != 0 else 0.1 # small angle approx
         smallest_index = np.argmin(copied_ranges) # fining the index
         
-        # TODO: eliminate points inside bubble
+        # eliminate points inside bubble
               
         # we want to know where the bubble will start and where it ends
           
@@ -346,22 +442,13 @@ class ReactiveFollowGap(Node):
 
         if self.recovery_logic(processed_ranges): return
 
-        # TODO: find best point in gap
         # find the max value in the gap
         best_index = self.max_val_in_gap(copied_ranges, start_gap_index, end_gap_index)
         
-        # TODO: calc steering angle to best point
         # ------------------------ {STEERING AND SPEED CALCULATIONS} ------------------------
         # convert index to angle
         angle_to_best = data.angle_min + (best_index+start) * data.angle_increment
         
-        # gain is more aggressive at sharper turns — this used to be
-        # backwards (1.5 - 0.5*frac gives its MAX multiplier at frac=0,
-        # i.e. dead straight), so any noise-driven wobble on a straight
-        # was getting amplified up to 1.5x while real sharp turns only
-        # got 1.0x. Flipped so small angles are damped (1.0x) and sharp
-        # turns get the full boost (1.5x), matching what this comment
-        # always said it should do.
         angle_frac = np.clip(abs(angle_to_best) / self.max_steering, 0.0, 1.0)
         gain = self.steering_gain * (1.0 + 0.5 * angle_frac)
         
@@ -374,24 +461,14 @@ class ReactiveFollowGap(Node):
         # LOW PASS FILTER (used in sensor fusion)
         # allows slow, steady signals to pass while blocking higher frequency noise
 
-        # angle = alpha * current + (1 - alpha) * angle
-        # dynamic alpha: this comment always said "smoothing on straights /
-        # non on corners" but alpha was hardcoded to 0.8 everywhere, so the
-        # car was just as heavily smoothed (and laggy) entering a bend as
-        # on a straight. Scale it by how sharp THIS frame's raw target
-        # angle already is — small target angle (straight ahead) -> heavy
-        # smoothing for stability; large target angle (curve) -> light
-        # smoothing so it actually reacts instead of lagging behind.
         curve_frac = np.clip(abs(steering_angle) / self.max_steering, 0.0, 1.0)
         alpha = self.alpha_straight - (self.alpha_straight - self.alpha_curve) * curve_frac
 
 
         old_steering = self.prev_steering
 
-
         steering_angle = alpha * self.prev_steering + (1 - alpha) * steering_angle
-        # TODO: calc speed based on steering angle and gap size
-        
+                
         # take anything infront of the car
         forward_beams = int(np.deg2rad(25) / data.angle_increment)
         mid = len(processed_ranges) // 2
@@ -420,16 +497,9 @@ class ReactiveFollowGap(Node):
         # more steering -> slower speeds
         # PURE PURSUIT METHOD (speed = max * cos(angle)^2 * distance)
 
-        # ── straightaway detection: predictive lookahead, continuous blend ──
-        # min_forward already looks ~25deg ahead of the car. A per-frame
-        # streak that resets to 0 on ANY single noisy frame is fragile —
-        # steering jitters a little frame to frame even on a real straight,
-        # so it can rarely accumulate enough consecutive "clean" frames to
-        # ever unlock. An EMA of steering magnitude smooths that noise out
-        # instead of throwing away all progress on one bad frame, and speed
-        # blends continuously toward speed_max as the corridor opens up —
-        # no hard on/off switch, so it doesn't need a "perfect" streak to
-        # actually reach a noticeably higher speed.
+        # straightaway detection: predictive lookahead, continuous blend
+        # Since we can run into the problem of being too noisy per frame, we created this. 
+        # An EMA of steering magnitude that will smoothen noise. The speed blends continuously towards a speed_max as corridor opens 
         self.straight_angle_ema = (1 - self.straight_ema_alpha) * self.straight_angle_ema + self.straight_ema_alpha * abs(steering_angle)
 
         forward_threshold = self.straight_min_forward_frac * self.max_lidar_range
@@ -641,20 +711,9 @@ class ReactiveFollowGap(Node):
         # aggression score chooses how to tune the individual weights
         aggression = 0.4 * width_score + 0.4 * depth_score + 0.2 * safety_score
 
-        # alpha should depend on current speed — fast means we're already
-        # committed on a clear stretch, so aiming at the deep point is fine;
-        # slow means we're likely approaching or already in a corner, so
-        # stay centered on the immediate corridor instead of reaching for
-        # a far point that might be down the NEXT segment past the bend.
-        # (this was previously inverted — slow used to mean MORE aggressive
-        # far-aiming, which is exactly backwards and was cutting corners
-        # early right as the car naturally slowed for them.)
         speed_factor = self.current_speed / self.speed_max # fast == 1, slow == 0
         alpha = np.clip(aggression * 0.5 + speed_factor * 0.5, 0.0, 1.0)
 
-        # overall dial on how much to ever trust "aim at the furthest
-        # point" vs. just following the immediate gap center — see
-        # gap_aim_aggressiveness in gap_params.yaml
         alpha *= self.gap_aim_aggressiveness
 
         return int(alpha * furthest_index + (1 - alpha) * centered_index)
@@ -676,15 +735,11 @@ class ReactiveFollowGap(Node):
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = self.get_clock().now().to_msg()
         drive_msg.header.frame_id = 'base_link'
-        drive_msg.drive.steering_angle = float(steering_angle)   # HARD ZERO — no exceptions
+        drive_msg.drive.steering_angle = float(steering_angle)
         drive_msg.drive.speed = float(speed)
 
         self.drive_pub.publish(drive_msg)
-
-        # recovery_logic() early-returns out of lidar_callback before the
-        # normal debug_pub.publish() at the bottom, so without this the
-        # dashboard/monitor go dark for the whole reversing maneuver —
-        # exactly when you most want to see what the car is doing.
+        
         debugging_message = Float32MultiArray()
         debugging_message.data = [
             float(speed),

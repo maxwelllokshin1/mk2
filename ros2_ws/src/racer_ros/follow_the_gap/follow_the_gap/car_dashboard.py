@@ -1,30 +1,4 @@
-#!/usr/bin/env python3
-"""
-Car dashboard — serves a live HTML telemetry dashboard fed by /car_info_debug.
-
-Usage (inside the container, after sourcing ROS):
-    ros2 run follow_the_gap car_dashboard
-
-Same /car_info_debug data source as car_info_monitor.py (Float32MultiArray:
-speed, odom_speed, steering, gap_start, gap_end, best), plus /lap_info
-(Float32MultiArray: lap_count, current_lap_elapsed, last_lap_time,
-best_lap_time) published by reactive_node.py's lap tracker — pushed to a
-browser dashboard over Server-Sent Events, opened automatically.
-
-Also serves a live parameter tuner (Tuner tab): GET /params reads
-reactive_node's current parameter values over its standard ROS2
-parameter service, POST /set_param writes one back live (no restart
-needed), and POST /restart repositions the car at its configured spawn
-pose (via /initialpose, same topic RViz's "2D Pose Estimate" uses) and
-clears reactive_node's own stuck/lap/recovery state.
-
-The HTTP server binds 0.0.0.0 and docker-compose.yml uses network_mode:
-host, so http://localhost:<PORT> is reachable from the Windows host
-browser too — open it there directly if no in-container browser is
-available.
-"""
-
-import json
+#!/usr/bin/env pythonimport json
 import math
 import os
 import queue

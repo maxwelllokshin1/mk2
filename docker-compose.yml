@@ -10,7 +10,7 @@ services:
     network_mode: "host"
     dns:
       - 8.8.8.8
-    entrypoint: ["/home/ubuntu/scripts/start_container.sh"]
+    entrypoint: ["bash", "/home/ubuntu/scripts/start_container.sh"]
     environment:
       #look inside of the .env file and you will see a varibale for BUILD_TARGET!
       # Pass the DISPLAY variable from the .env file into the container

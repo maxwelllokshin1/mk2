@@ -1,41 +1,28 @@
 reactive_node:
   ros__parameters:
+    # NOTE: bubble_radius, max_lidar_range, speed_max, fov_deg,
+    # recovery_clear_dist, lap_leave_dist and lap_return_dist are no longer
+    # fixed absolutes — they're the REFERENCE values for a track whose
+    # corridors are reference_corridor_m wide (see the "dynamic track-scale
+    # adaptation" block below). Tune them as if for a medium-size track; a
+    # smaller/tighter track shrinks all of them together at runtime, a
+    # bigger/more open one grows them, both within min/max_track_scale.
     bubble_radius: 0.3 # safety zone drawn around closest obstacle lidar sees, car treats as blocked off
 
     preprocess_conv_size: 3 # fixed the code typo that made this a no-op (was "preporcess_conv_size") — now it actually sets the lidar smoothing window size
 
     max_lidar_range: 3.5 # how far i allow the car to "see"
-    
-    speed_max: 15.0 
+
+    speed_max: 15.0
 
     steering_gain: 0.38 # how hard the car turns toward target (up -> sharper turn | down -> slower turn)
 
-    # steering low-pass — alpha now scales with how sharp the raw target
-    # angle already is, instead of a fixed 0.8 everywhere. Small target
-    # angle (straight) -> alpha_straight (heavy smoothing, stable). Large
-    # target angle (curve) -> alpha_curve (light smoothing, reacts fast
-    # instead of lagging a beat behind the turn).
     alpha_straight: 0.6 # dynamic on straights (up -> stable, ignore wobble | down -> twitchier)
     alpha_curve: 0.60 # dynamic on curves (up -> smoother but slower on turns | down -> reacts instantly)
 
-    # how far around bends the car can "see" and react to. fov_deg is
-    # degrees EACH side of center (was hardcoded 100 — wide enough to see
-    # through a bend into the next corridor segment and start turning
-    # toward it early, before the car is actually at the turn).
-    # gap_aim_aggressiveness: 0 = always aim at the gap's center (follow
-    # the immediate corridor); 1 = original behavior (aim at the furthest
-    # visible point, which is often down the next segment past a bend).
     fov_deg: 70.0
     gap_aim_aggressiveness: 0.5
 
-    # straightaway detection (predictive lookahead) — speed blends smoothly
-    # toward speed_max as the forward lidar cone opens up and a
-    # steering-magnitude EMA stays low (not a per-frame streak, which is
-    # too easily reset by ordinary steering jitter to ever unlock).
-    # straight_min_forward_frac is a FRACTION of max_lidar_range, not an
-    # absolute meters value — ranges are clipped to max_lidar_range, so an
-    # absolute threshold above it can never be satisfied and silently
-    # disables straight mode entirely.
     straight_min_forward_frac: 0.75
     straight_max_angle_deg: 6.0
     straight_ema_alpha: 0.2
@@ -49,10 +36,19 @@ reactive_node:
     wheelbase: 0.25
     lidar_view_every_n: 10
 
-    # recovery — dynamic, direction-aware backing out. Steers away from
-    # whichever side actually has less room (measured each stuck event,
-    # not a fixed direction), and keeps reversing until BOTH sides
-    # measure clear rather than a blind fixed-time timer.
     recovery_straight_time: 0.8
     recovery_clear_dist: 1.0
     recovery_max_time: 6.0
+
+    # ── dynamic track-scale adaptation ──
+    # every scan, estimate "how wide is the corridor around the car right
+    # now" and scale bubble_radius / max_lidar_range / fov_deg / speed_max /
+    # recovery_clear_dist / lap_leave_dist / lap_return_dist away from the
+    # reference values above by that estimate. Set enable_dynamic_scaling to
+    # false to go back to the old fixed-value behavior exactly.
+    enable_dynamic_scaling: true
+    lidar_hw_range_m: 10.0        # your lidar's real max reliable range (Hokuyo UST-10LX ~10m); only clips the measurement, never the driving values
+    reference_corridor_m: 2.0     # corridor width (m) the values above were tuned for — measure your usual test track
+    min_track_scale: 0.4          # floor: how much a tiny track can shrink everything
+    max_track_scale: 1.8          # ceiling: how much a huge track can grow everything — lower this before a real (non-sim) speed_max test, see mcu_bridge's own hard speed clamp too
+    track_scale_ema_alpha: 0.05   # smoothing on the estimate — higher adapts faster but jitters more
