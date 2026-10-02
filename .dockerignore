@@ -1,0 +1,11 @@
+.git
+.DS_Store
+**/__pycache__
+**/*.pyc
+demo_vids
+mcu_ws/.pio
+mcu_ws/libs_external
+ros2_ws/src/f1tenth_gym_ros
+**/build
+**/install
+**/log

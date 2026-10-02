@@ -40,12 +40,6 @@ reactive_node:
     recovery_clear_dist: 1.0
     recovery_max_time: 6.0
 
-    # ── dynamic track-scale adaptation ──
-    # every scan, estimate "how wide is the corridor around the car right
-    # now" and scale bubble_radius / max_lidar_range / fov_deg / speed_max /
-    # recovery_clear_dist / lap_leave_dist / lap_return_dist away from the
-    # reference values above by that estimate. Set enable_dynamic_scaling to
-    # false to go back to the old fixed-value behavior exactly.
     enable_dynamic_scaling: true
     lidar_hw_range_m: 10.0        # your lidar's real max reliable range (Hokuyo UST-10LX ~10m); only clips the measurement, never the driving values
     reference_corridor_m: 2.0     # corridor width (m) the values above were tuned for — measure your usual test track

@@ -1,0 +1,63 @@
+# pi_drive parameters. All numbers that are floats MUST have a decimal point (1500.0, not 1500).
+#
+# Tune in this order, with the wheels OFF THE GROUND:
+#   1. pins            2. steering direction + end stops      3. ESC neutral / arming
+#   4. rc_forward / rc_reverse        5. Joy-Con button names (ros2 run pi_drive joycon_probe)
+
+gpio_driver:
+  ros__parameters:
+    # ---- PINS: BCM GPIO numbers (not header pin numbers). -1 = not connected -> DRY RUN, nothing moves.
+    steer_gpio: -1
+    throttle_gpio: -1
+    gpiochip: 0
+
+    command_timeout_s: 0.5      # no /drive_cmd for this long -> steering centered, throttle neutral
+    arm_time_s: 3.0             # ESC held at neutral this long after start
+    throttle_slew_per_s: 2.0    # how fast throttle may ramp up (1.0 = full in 0.5 s)
+    reverse_neutral_s: 0.25     # forward <-> reverse waits this long at neutral
+
+    # ---- steering servo (all PLACEHOLDERS: measure your servo, start with small ranges)
+    steer_center_us: 1500.0
+    steer_range_us: 200.0       # us from center at full lock
+    steer_sign: 1.0             # flip to -1.0 if left turns right
+    steer_min_us: 1300.0        # hard clamps, set just inside the mechanical end stops
+    steer_max_us: 1700.0
+
+    # ---- ESC (PLACEHOLDERS)
+    throttle_neutral_us: 1500.0
+    throttle_deadband_us: 25.0  # raise if small throttle does nothing
+    throttle_fwd_max_us: 1700.0
+    throttle_rev_min_us: 1300.0
+
+    # ---- dead-reckoned odom for follow_the_gap's stuck detection (NOT measured)
+    odom_speed_at_full_throttle: 2.0
+    odom_max_steer_rad: 0.52
+    wheelbase: 0.25
+
+joycon_teleop:
+  ros__parameters:
+    # ---- driving feel (throttle is -1..1 of the ESC range above)
+    rc_forward: 0.30            # throttle while A is held
+    rc_reverse: 0.25            # throttle while B is held
+    steer_deadzone: 0.12
+    steer_sign: -1.0            # flip to 1.0 if the stick steers backwards
+
+    # ---- autonomy (hold R). Steering AND speed follow reactive_node; throttle is its speed
+    # scaled so that auto_speed_ref_mps -> auto_max_throttle. auto_max_throttle is your speed
+    # ceiling: raise it step by step as the car does well. Keep auto_speed_ref_mps equal to
+    # follow_the_gap gap_params speed_max (0.0 = ignore its speed, use fixed auto_throttle).
+    auto_speed_ref_mps: 15.0
+    auto_max_throttle: 0.25
+    auto_min_throttle: 0.12
+    auto_throttle: 0.25
+    auto_reverse_throttle: 0.25
+    auto_max_steer_rad: 0.52    # = reactive_node max_steering (30 deg)
+    auto_timeout_s: 0.5
+
+    # ---- which Joy-Con / evdev names (verify with joycon_probe)
+    steer_side: left
+    steer_axis: ABS_X
+    button_side: right
+    a_button: BTN_EAST
+    b_button: BTN_SOUTH
+    autonomy_button: BTN_TR     # R (top right shoulder button)

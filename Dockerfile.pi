@@ -1,0 +1,94 @@
+# =============================================================
+# Raspberry Pi (1 GB RAM) image — runtime only, built OFF the Pi
+#
+#   docker buildx build --platform linux/arm64 -f Dockerfile.pi -t airacer:pi .
+#
+# Build this on your Mac / a PC, never on the Pi: colcon + C++ compiles need
+# several GB of RAM. The Pi only ever loads and runs the finished image.
+#
+# Contents: follow_the_gap, pi_drive, urg_node2 (LiDAR), ackermann_msgs.
+# Left out on purpose: Xvfb/VNC, RViz, Nav2, slam_toolbox, f1tenth gym,
+# micro-ROS agent, PlatformIO, gdb, compilers.
+# =============================================================
+
+# ---------- builder: compiles the workspace, thrown away afterwards ----------
+FROM ros:humble-ros-base AS builder
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /ws
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir src \
+    && git clone --depth 1 https://github.com/ros-drivers/ackermann_msgs.git src/ackermann_msgs \
+    && git clone --depth 1 --recurse-submodules --shallow-submodules \
+        https://github.com/Hokuyo-aut/urg_node2.git src/urg_node2
+
+# UST-10LX field of view (+-12 deg), same as the dev image
+RUN cp src/urg_node2/config/params_ether.yaml src/urg_node2/config/ust10lx.yaml \
+    && sed -i 's/angle_min.*/angle_min: -0.20944/; s/angle_max.*/angle_max: 0.20944/' \
+        src/urg_node2/config/ust10lx.yaml
+
+COPY ros2_ws/src/racer_ros/follow_the_gap src/racer_ros/follow_the_gap
+COPY ros2_ws/src/racer_ros/pi_drive       src/racer_ros/pi_drive
+
+RUN apt-get update && rosdep update \
+    && rosdep install --from-paths src --ignore-src -y -r \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN . /opt/ros/humble/setup.sh \
+    && colcon build --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    && rm -rf build log
+
+# Resolve the NON-ROS runtime (exec) dependencies, e.g. python3-serial, so the runtime
+# stage needs no rosdep/network lookups. (`rosdep install -s` can't be used for
+# this: it prints nothing for packages that are already installed.)
+# ROS runtime libs that ros-base lacks are listed by hand in the runtime stage.
+RUN . /opt/ros/humble/setup.sh \
+    && rosdep keys --from-paths src --ignore-src --dependency-types=exec \
+        | xargs rosdep resolve --rosdistro humble 2>/dev/null \
+        | grep -v '^#' | sort -u | tr '\n' ' ' > /ws/apt-exec.txt \
+    ; echo "runtime apt packages: $(cat /ws/apt-exec.txt)"
+
+# ---------- runtime: what actually runs on the Pi ----------
+FROM ros:humble-ros-base AS runtime
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
+    ROS_DOMAIN_ID=0
+
+# Cyclone DDS: fewer threads and lower RAM than the default Fast DDS.
+# Runtime Python deps for the nodes + the GPIO/serial backends.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-humble-rmw-cyclonedds-cpp \
+        ros-humble-diagnostic-updater \
+        ros-humble-laser-proc \
+        python3-numpy \
+        python3-serial \
+        python3-lgpio \
+        python3-evdev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /ws/install /ws/install
+COPY --from=builder /ws/apt-exec.txt /tmp/apt-exec.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends $(cat /tmp/apt-exec.txt) \
+    && rm -rf /var/lib/apt/lists/* /tmp/apt-exec.txt
+
+RUN useradd --uid 1000 -m -s /bin/bash ubuntu 2>/dev/null || true \
+    && echo "source /opt/ros/humble/setup.bash && source /ws/install/setup.bash" >> /home/ubuntu/.bashrc
+
+COPY <<'EOS' /pi_entrypoint.sh
+#!/bin/bash
+set -e
+source /opt/ros/humble/setup.bash
+source /ws/install/setup.bash
+exec "$@"
+EOS
+RUN chmod +x /pi_entrypoint.sh
+
+USER ubuntu
+WORKDIR /home/ubuntu
+ENTRYPOINT ["/pi_entrypoint.sh"]
+CMD ["bash"]

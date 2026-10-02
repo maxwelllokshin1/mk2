@@ -1,0 +1,39 @@
+# Raspberry Pi 3 (1 GB) — run with:  docker compose -f docker-compose.pi.yml up -d
+# Image is built elsewhere and loaded onto the Pi (see scripts/pi/README.md).
+services:
+  racer:
+    image: airacer:pi
+    container_name: racer
+    network_mode: host          # DDS discovery + LiDAR over ethernet
+    restart: unless-stopped
+    init: true                  # reap zombie processes
+    # Starts everything: Joy-Con teleop, GPIO driver, LiDAR, autonomy, dashboard.
+    # Flags: lidar:=false  autonomy:=false  dashboard:=false
+    command: ["ros2", "launch", "pi_drive", "pi_drive.launch.py"]
+    # Hard ceiling so a runaway node gets OOM-killed inside the container
+    # instead of freezing the whole Pi. memswap = mem + 512 MB of swap.
+    mem_limit: 640m
+    memswap_limit: 1152m
+    cpus: 3.0                   # leave one core for the OS / SSH
+    pids_limit: 256
+    # Only the devices that are needed — no privileged, no /sys, no /dev mount.
+    devices:
+      - /dev/gpiochip0:/dev/gpiochip0
+      - /dev/gpiomem:/dev/gpiomem
+      # - /dev/ttyACM0:/dev/ttyACM0   # VESC / Arduino, uncomment if used
+    group_add:
+      # numeric host gids:  getent group gpio dialout input
+      - "${GPIO_GID:-994}"
+      - "${DIALOUT_GID:-20}"
+      - "${INPUT_GID:-105}"     # Joy-Cons show up as /dev/input/event* (group "input")
+    # Joy-Cons connect AFTER the container starts, so mount the whole directory
+    # (new event nodes appear live) and allow input devices (char major 13).
+    device_cgroup_rules:
+      - "c 13:* rmw"
+    volumes:
+      - /dev/input:/dev/input
+      # edit pins / tuning on the Pi without rebuilding the image:
+      - ./ros2_ws/src/racer_ros/pi_drive/config/pi_drive.yaml:/ws/install/pi_drive/share/pi_drive/config/pi_drive.yaml:ro
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
