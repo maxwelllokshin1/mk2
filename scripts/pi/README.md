@@ -18,7 +18,8 @@ See [pi_drive/README.md](../../ros2_ws/src/racer_ros/pi_drive/README.md) (pairin
 
 ## 4. Run
 ```bash
-getent group gpio dialout input    # put the numbers in GPIO_GID / DIALOUT_GID / INPUT_GID if different
+# one-time: write this Pi's group ids into .env (docker compose reads it automatically)
+for g in gpio:GPIO dialout:DIALOUT input:INPUT i2c:I2C; do echo "${g##*:}_GID=$(getent group ${g%%:*} | cut -d: -f3)"; done >> .env
 docker compose -f docker-compose.pi.yml up -d
 docker logs -f racer                # starts Joy-Con teleop, GPIO driver, LiDAR, autonomy, dashboard
 docker exec -it racer bash

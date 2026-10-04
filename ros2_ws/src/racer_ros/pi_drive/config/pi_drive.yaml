@@ -6,8 +6,9 @@
 
 gpio_driver:
   ros__parameters:
-    # ---- PINS: BCM GPIO numbers (not header pin numbers). -1 = not connected -> DRY RUN, nothing moves.
-    steer_gpio: -1
+    # ---- PINS: BCM GPIO numbers (not header pin numbers). -1 = not connected.
+    # Both -1 -> DRY RUN (nothing moves). Servo only for now; set throttle_gpio (19 = header pin 35) when the ESC is wired.
+    steer_gpio: 18              # header pin 12
     throttle_gpio: -1
     gpiochip: 0
 
@@ -61,3 +62,49 @@ joycon_teleop:
     a_button: BTN_EAST
     b_button: BTN_SOUTH
     autonomy_button: BTN_TR     # R (top right shoulder button)
+
+# =====================================================================================
+# OLED eyes (128x64 I2C, SSD1306). Image paths are relative to this config folder.
+# Layers are listed BOTTOM -> TOP. layer_sizes = w,h per layer; layer_positions = center x,y per layer.
+# =====================================================================================
+oled_display:
+  ros__parameters:
+    layers: ['eyes/eyeball.png', 'eyes/eye.png', 'eyes/blink.gif']
+    layer_sizes: [128, 64,   44, 44,   128, 64]
+    layer_positions: [64, 32,   64, 32,   64, 32]
+    movable_layer: 1            # the iris (index 1) moves; -1 = nothing moves
+    move_limits: [30, 98, 16, 48]   # x_min, x_max, y_min, y_max the iris CENTER may reach
+    gif_gap_s: 4.0              # the eyelid GIF plays once every 4 s (0 = loop non-stop)
+    render_hz: 15.0
+    threshold: 160              # 1-bit cutoff. 160 keeps the blue iris ring dark (128 made it vanish into the white)
+    dither: false
+    track_person: true          # iris follows /person
+    track_invert_x: true        # flip if the eyes look the wrong way
+    track_invert_y: false
+    track_smooth: 0.35          # 1.0 = snap, smaller = glide
+    lost_timeout_s: 2.0         # iris returns to center this long after the person leaves
+    i2c_bus: 1
+    i2c_address: 60             # 0x3C
+    driver: ssd1306             # sh1106 if the picture is shifted / has a noisy column
+    rotate: 0
+    preview_path: ''            # e.g. /tmp/oled.png writes what the screen shows (no screen needed)
+
+# =====================================================================================
+# Person detection: camera -> YOLOv8 ONNX -> ONE person (/person, x/y 0..1)
+# =====================================================================================
+person_detector:
+  ros__parameters:
+    source: tcp://127.0.0.1:8888   # ribbon camera: the host streams it (scripts/pi/camera-stream.service)
+                                   # USB webcam instead: /dev/video0 (and add it to devices: in compose)
+                                   # testing: a photo/video file path
+    width: 320                  # only used for USB webcams; for the stream see camera-stream.service
+    height: 240
+    fourcc: MJPG
+    model_path: yolov8n.onnx    # in this config folder. Export from yolov8n.pt (see README)
+    input_size: 320             # MUST equal the imgsz used for the ONNX export
+    conf_threshold: 0.5
+    nms_threshold: 0.45
+    select: largest             # largest = closest person | confident
+    detect_hz: 2.0              # keep low on a Pi 3
+    cv_threads: 2
+    debug_image_path: ''        # e.g. /tmp/person.jpg shows the camera frame with the box

@@ -6,7 +6,7 @@
 # Build this on your Mac / a PC, never on the Pi: colcon + C++ compiles need
 # several GB of RAM. The Pi only ever loads and runs the finished image.
 #
-# Contents: follow_the_gap, pi_drive, urg_node2 (LiDAR), ackermann_msgs.
+# Contents: follow_the_gap, pi_drive (Joy-Con, GPIO, OLED, person detection), urg_node2 (LiDAR), ackermann_msgs.
 # Left out on purpose: Xvfb/VNC, RViz, Nav2, slam_toolbox, f1tenth gym,
 # micro-ROS agent, PlatformIO, gdb, compilers.
 # =============================================================
@@ -68,7 +68,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-serial \
         python3-lgpio \
         python3-evdev \
-    && rm -rf /var/lib/apt/lists/*
+        python3-pip \
+    && pip3 install --no-cache-dir luma.oled opencv-python-headless==4.10.0.84 \
+    && rm -rf /var/lib/apt/lists/* /root/.cache
 
 COPY --from=builder /ws/install /ws/install
 COPY --from=builder /ws/apt-exec.txt /tmp/apt-exec.txt

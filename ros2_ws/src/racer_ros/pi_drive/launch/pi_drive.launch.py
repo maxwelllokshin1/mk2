@@ -11,6 +11,8 @@ Args:
     lidar:=false       skip the Hokuyo (RC only, or no LiDAR plugged in)
     autonomy:=false    skip reactive_node (R then does nothing useful)
     dashboard:=false   skip the web dashboard (http://<pi-ip>:8080)
+    oled:=false        skip the OLED eyes
+    person:=false      skip camera person detection
     params_file:=...   override pi_drive.yaml
 """
 import os
@@ -52,6 +54,17 @@ def generate_launch_description():
         package='follow_the_gap', executable='car_dashboard', name='car_dashboard',
         output='screen', condition=IfCondition(LaunchConfiguration('dashboard')))
 
+    oled = Node(
+        package='pi_drive', executable='oled_display_node', name='oled_display',
+        output='screen', parameters=[params_file],
+        condition=IfCondition(LaunchConfiguration('oled')))
+
+    # lower priority: YOLO must never starve the GPIO driver's software PWM of CPU
+    person = Node(
+        package='pi_drive', executable='person_node', name='person_detector',
+        output='screen', parameters=[params_file], prefix='nice -n 10',
+        condition=IfCondition(LaunchConfiguration('person')))
+
     # Hokuyo is a lifecycle node: it publishes nothing until configured + activated.
     # The default config in the image is +-12 deg, which is far too narrow for
     # follow_the_gap (it uses +-70 deg), so widen to +-120 deg like the old autonomy.launch.
@@ -81,7 +94,9 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar', default_value='true'),
         DeclareLaunchArgument('autonomy', default_value='true'),
         DeclareLaunchArgument('dashboard', default_value='true'),
+        DeclareLaunchArgument('oled', default_value='true'),
+        DeclareLaunchArgument('person', default_value='true'),
         DeclareLaunchArgument('params_file',
                               default_value=os.path.join(pi_dir, 'config', 'pi_drive.yaml')),
-        gpio_driver, teleop, reactive, dashboard, lidar, activate, *configure_attempts,
+        gpio_driver, teleop, reactive, dashboard, oled, person, lidar, activate, *configure_attempts,
     ])

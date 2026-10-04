@@ -63,6 +63,8 @@ def demo_frames(n=40):
 
 
 def main():
+    
+    # arguments
     ap = argparse.ArgumentParser()
     ap.add_argument('source', nargs='?', help='GIF file or folder of frames (default: demo)')
     ap.add_argument('--fps', type=float, default=None, help='frames per second (default: GIF timing, or 15 for folders / demo)')

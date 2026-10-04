@@ -1,0 +1,23 @@
+# Streams the Raspberry Pi ribbon (CSI) camera as MJPEG on localhost:8888 so the racer container can read it.
+# The container uses network_mode: host, so it sees this port as tcp://127.0.0.1:8888.
+#
+# Install on the Pi (host, not in the container):
+#   sudo apt install -y rpicam-apps-lite
+#   rpicam-hello --list-cameras                     # must list your camera
+#   sudo cp scripts/pi/camera-stream.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now camera-stream
+#   systemctl status camera-stream
+#
+# Camera upside down? add --hflip --vflip to ExecStart. 320x240 at 8 fps is plenty: detection runs at 2 Hz.
+[Unit]
+Description=Pi camera MJPEG stream for the racer
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/rpicam-vid -n -t 0 --codec mjpeg --quality 50 --width 320 --height 240 --framerate 8 --listen -o tcp://127.0.0.1:8888
+# rpicam-vid exits when the container disconnects (restart/stop); come straight back and wait for the next client
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

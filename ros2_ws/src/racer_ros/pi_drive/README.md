@@ -61,3 +61,46 @@ ESC's BEC or a battery — never from the Pi's 5 V pin. 3.3 V logic is fine for 
 - Autonomy throttle is a fixed low value (`auto_throttle`), not the 15 m/s `reactive_node` asks for.
 - Some car ESCs need a brake-then-neutral sequence before reverse; the driver only guarantees a neutral pause.
 - Run the unit tests: `python3 -m pytest test` (no hardware needed).
+
+## OLED eyes + person tracking
+
+```
+USB webcam -> person_detector (YOLOv8 ONNX, OpenCV) --/person (x,y 0..1)--> oled_display --> 128x64 OLED
+                                                      /oled/layer_xy (x,y pixels) ---^
+```
+- **`oled_display`** stacks layers bottom -> top from `config/pi_drive.yaml` (`layers`, `layer_sizes`,
+  `layer_positions`). Default: `eyes/eyeball.png` (white), `eyes/eye.png` (iris, **the movable layer**),
+  `eyes/blink.gif` (eyelid, plays once every `gif_gap_s` = 4 s). Edit the images in
+  `config/eyes/` (PNG/GIF transparency is respected; images are scaled to `layer_sizes`).
+- **Move the iris yourself:** publish `geometry_msgs/Point` (x, y = center in display pixels) to `/oled/layer_xy`:
+  `ros2 topic pub --once /oled/layer_xy geometry_msgs/msg/Point "{x: 40.0, y: 30.0}"`.
+  Positions are clamped to `move_limits` and eased (`track_smooth`).
+- **It follows the person** while `track_person: true`; it returns to center 2 s after they leave.
+  If the eyes look the wrong way, flip `track_invert_x` / `track_invert_y`.
+- **`person_detector`** reports ONE person only (the largest box = closest, or `select: confident`):
+  `/person` (`PointStamped`: x, y = box center as 0..1 of the image, 0,0 = top-left; z = confidence) and
+  `/person_detected` (`Bool`). Runs at 2 Hz and at low priority so it can't starve the GPIO driver.
+- **The model is `model_path` in the config.** It must be an ONNX file (PyTorch/ultralytics would use
+  400-500 MB of the Pi's 1 GB). Export your `.pt` once on a PC:
+  ```bash
+  pip install ultralytics onnx
+  yolo export model=config/yolov8n.pt format=onnx imgsz=320 opset=12     # -> config/yolov8n.onnx
+  ```
+  `input_size` in the yaml must match the `imgsz` you export with.
+- **Camera (Pi ribbon / CSI):** OpenCV can't read these directly, so the HOST streams it:
+  `scripts/pi/camera-stream.service` runs `rpicam-vid` (MJPEG on `tcp://127.0.0.1:8888`) and the node's
+  `source` reads that. Setup: `sudo apt install -y rpicam-apps-lite`, `rpicam-hello --list-cameras`,
+  copy the .service to `/etc/systemd/system/`, `sudo systemctl enable --now camera-stream`. For a USB
+  webcam use `source: /dev/video0` and uncomment `/dev/video0` in the compose `devices:`.
+- **No hardware needed to test:** `source: /path/to/photo.jpg` makes the detector use a still image;
+  `preview_path: /tmp/oled.png` writes what the screen would show; `debug_image_path: /tmp/p.jpg`
+  writes the camera frame with the chosen box.
+- **I2C is single-owner:** the container drives the OLED now, so don't run `scripts/pi/oled_test.py` /
+  `oled_animate.py` on the host at the same time (stop the container first: `docker compose -f docker-compose.pi.yml stop`).
+- Compose needs `/dev/i2c-1` to exist when the container starts (enable I2C), and your group ids in `.env`
+  (see scripts/pi/README.md).
+- Launch flags: `oled:=false`, `person:=false`.
+
+**CPU warning:** YOLO on a Pi 3 takes roughly 0.5-1.5 s per frame and keeps cores busy. The GPIO driver makes
+its servo/ESC pulses in software, so heavy CPU load can add jitter. If the servo twitches while the camera runs,
+launch with `person:=false` while driving, or move the pulses to hardware PWM.
