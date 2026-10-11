@@ -22,9 +22,12 @@ cat > /etc/docker/daemon.json <<'CONF'
 { "log-driver": "json-file", "log-opts": { "max-size": "5m", "max-file": "2" } }
 CONF
 
-# 4) Minimal GPU memory split (headless) and cgroup memory limits
+# 4) GPU memory split and cgroup memory limits.
+#    NOT 16: with gpu_mem=16 the Pi 3 loads the cut-down firmware, which has no camera/ISP support
+#    (the CSI camera then fails with "rpicam-apps currently only supports the Raspberry Pi platforms").
+#    64 is the Pi 3 default and keeps the camera working.
 CFG=/boot/firmware/config.txt; [ -f "$CFG" ] || CFG=/boot/config.txt
-grep -q '^gpu_mem=' "$CFG" && sed -i 's/^gpu_mem=.*/gpu_mem=16/' "$CFG" || echo 'gpu_mem=16' >> "$CFG"
+grep -q '^gpu_mem=' "$CFG" && sed -i 's/^gpu_mem=.*/gpu_mem=64/' "$CFG" || echo 'gpu_mem=64' >> "$CFG"
 CMD=/boot/firmware/cmdline.txt; [ -f "$CMD" ] || CMD=/boot/cmdline.txt
 grep -q 'cgroup_enable=memory' "$CMD" || sed -i '1 s/$/ cgroup_enable=memory cgroup_memory=1/' "$CMD"
 
