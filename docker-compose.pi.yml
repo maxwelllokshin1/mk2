@@ -21,7 +21,8 @@ services:
       # Pi 5: header GPIO is the RP1 chip. Check `gpiodetect` for pinctrl-rp1 (gpiochip0 on current kernels,
       # older ones used gpiochip4). Pi 3/4: gpiochip0.
       - /dev/gpiochip0:/dev/gpiochip0
-      - /dev/gpiomem:/dev/gpiomem
+      # Pi 3/4 only (does not exist on a Pi 5, docker refuses to start if it is missing):
+      # - /dev/gpiomem:/dev/gpiomem
       # Must EXIST when the container starts (enable I2C) or docker refuses to start it.
       - /dev/i2c-1:/dev/i2c-1       # OLED
       # USB webcam only (the ribbon camera is streamed in over tcp, no device needed):
