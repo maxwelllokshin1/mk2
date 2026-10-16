@@ -12,12 +12,14 @@ services:
     command: ["ros2", "launch", "pi_drive", "pi_drive.launch.py"]
     # Hard ceiling so a runaway node gets OOM-killed inside the container
     # instead of freezing the whole Pi. memswap = mem + 512 MB of swap.
-    mem_limit: 640m
-    memswap_limit: 1152m
+    mem_limit: 2g               # Pi 3 (1 GB): use 640m / memswap 1152m
+    memswap_limit: 3g
     cpus: 3.0                   # leave one core for the OS / SSH
     pids_limit: 256
     # Only the devices that are needed — no privileged, no /sys, no /dev mount.
     devices:
+      # Pi 5: header GPIO is the RP1 chip. Check `gpiodetect` for pinctrl-rp1 (gpiochip0 on current kernels,
+      # older ones used gpiochip4). Pi 3/4: gpiochip0.
       - /dev/gpiochip0:/dev/gpiochip0
       - /dev/gpiomem:/dev/gpiomem
       # Must EXIST when the container starts (enable I2C) or docker refuses to start it.

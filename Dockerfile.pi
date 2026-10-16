@@ -69,7 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-lgpio \
         python3-evdev \
         python3-pip \
-    && pip3 install --no-cache-dir luma.oled opencv-python-headless==4.10.0.84 \
+    && pip3 install --no-cache-dir rpi-lgpio luma.oled opencv-python-headless==4.10.0.84 \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 COPY --from=builder /ws/install /ws/install
