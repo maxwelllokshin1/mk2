@@ -7,6 +7,10 @@ services:
     network_mode: host          # DDS discovery + LiDAR over ethernet
     restart: unless-stopped
     init: true                  # reap zombie processes
+    environment:
+      # rpi-lgpio (the RPi.GPIO shim on a Pi 5) can't read the board revision inside the container.
+      # Set it in .env from the host:  echo "RPI_LGPIO_REVISION=$(awk '/Revision/{print $3}' /proc/cpuinfo)" >> .env
+      RPI_LGPIO_REVISION: "${RPI_LGPIO_REVISION:-c04170}"
     # Starts everything: Joy-Con teleop, GPIO driver, LiDAR, autonomy, dashboard, OLED, person detection.
     # Flags: lidar:=false  autonomy:=false  dashboard:=false  oled:=false  person:=false
     command: ["ros2", "launch", "pi_drive", "pi_drive.launch.py"]
