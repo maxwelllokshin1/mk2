@@ -19,14 +19,14 @@ buttons, and put the names it prints in pi_drive.yaml.
 Publishes /drive_cmd [steering, throttle] at publish_hz, always (even zeros),
 and /drive_mode (String) for the dashboard.
 """
+import math
 import os
+from dataclasses import dataclass
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, String
 from ackermann_msgs.msg import AckermannDriveStamped
-
-from pi_drive.mixer import Inputs, Mixer, MixerConfig, clamp
 
 try:
     import evdev
@@ -36,32 +36,111 @@ except ImportError:  # shows a clear error from the node instead of crashing on 
     ecodes = None
 
 
+# ///////////////// CONFIGS \\\\\\\\\\\\\\\\\\\\
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+def apply_deadzone(v, dz):
+    """Zero inside the deadzone, rescaled so output still reaches +-1."""
+    if abs(v) <= dz:
+        return 0.0
+    return math.copysign((abs(v) - dz) / (1.0 - dz), v)
+
+
+@dataclass
+class MixerConfig:
+    steer_deadzone: float = 0.12
+    steer_sign: float = -1.0           # raw stick axis -> + = left. Flip if steering is backwards
+    rc_forward: float = 0.30           # throttle while A is held
+    rc_reverse: float = 0.25           # throttle (magnitude) while B is held
+    auto_throttle: float = 0.25        # fixed autonomy throttle; only used when auto_speed_ref_mps <= 0
+    auto_speed_ref_mps: float = 15.0   # reactive_node speed that maps to auto_max_throttle. Set = gap_params speed_max (>0 = follow its speed)
+    auto_max_throttle: float = 0.25    # THE autonomy speed ceiling: raise as the car proves itself
+    auto_min_throttle: float = 0.12    # floor while moving, so slow sections still get past the ESC deadband
+    auto_reverse_throttle: float = 0.25
+    auto_max_steer_rad: float = 0.52   # autonomy steering_angle that equals full lock (reactive_node max_steering = 30 deg)
+    auto_speed_deadband: float = 0.05  # |autonomy speed| below this = stop
+    auto_timeout_s: float = 0.5        # /drive older than this is treated as missing
+
+
+@dataclass
+class Inputs:
+    have_steer: bool = False   # the Joy-Con with the steering stick is connected
+    have_buttons: bool = False # the Joy-Con with A / B / R is connected
+    stick: float = 0.0         # raw steering axis, -1..1
+    a: bool = False
+    b: bool = False
+    r: bool = False
+
+
+# Turns "what the Joy-Cons are doing" + "what the autonomy node last said" into one command: (steering, throttle, mode).
+class Mixer:
+    def __init__(self, cfg: MixerConfig):
+        self.cfg = cfg
+
+    def mix(self, inp: Inputs, auto_steer_rad: float = 0.0,
+            auto_speed: float = 0.0, auto_age_s: float = float('inf')):
+        c = self.cfg
+
+        if not inp.have_steer and not inp.have_buttons:
+            return 0.0, 0.0, 'NO_CONTROLLER'
+
+        if inp.have_buttons and inp.r:
+            if auto_age_s > c.auto_timeout_s:
+                return 0.0, 0.0, 'AUTO_WAITING'
+            steering = clamp(auto_steer_rad / c.auto_max_steer_rad, -1.0, 1.0)
+            if auto_speed > c.auto_speed_deadband:
+                if c.auto_speed_ref_mps > 0.0:
+                    # follow reactive_node's own speed (it already slows for tight tracks / corners)
+                    frac = clamp(auto_speed / c.auto_speed_ref_mps, 0.0, 1.0)
+                    throttle = max(c.auto_min_throttle, frac * c.auto_max_throttle)
+                    throttle = min(throttle, c.auto_max_throttle)
+                else:
+                    throttle = c.auto_throttle
+            elif auto_speed < -c.auto_speed_deadband:
+                throttle = -c.auto_reverse_throttle
+            else:
+                throttle = 0.0
+            return steering, throttle, 'AUTO'
+
+        steering = 0.0
+        if inp.have_steer:
+            steering = clamp(c.steer_sign * apply_deadzone(inp.stick, c.steer_deadzone), -1.0, 1.0) + 0.0  # + 0.0 turns -0.0 into 0.0
+
+        throttle = 0.0
+        if inp.have_buttons:
+            if inp.a and not inp.b:
+                throttle = c.rc_forward
+            elif inp.b and not inp.a:
+                throttle = -c.rc_reverse
+        return steering, throttle, 'RC'
+
+
 class JoyconTeleop(Node):
     def __init__(self):
         super().__init__('joycon_teleop')
 
-        d = self.declare_parameter
         cfg = MixerConfig()
         for k, v in cfg.__dict__.items():
-            d(k, float(v))
-        d('publish_hz', 30.0)
-        d('poll_hz', 100.0)
-        d('rescan_s', 2.0)
-        d('left_name_contains', ['left joy-con', 'joy-con (l)'])
-        d('right_name_contains', ['right joy-con', 'joy-con (r)'])
-        d('steer_side', 'left')           # which Joy-Con's stick steers
-        d('steer_axis', 'ABS_X')
-        d('button_side', 'right')         # which Joy-Con has A / B / R
-        d('a_button', 'BTN_EAST')
-        d('b_button', 'BTN_SOUTH')
-        d('autonomy_button', 'BTN_TR')
+            self.declare_parameter(k, float(v))
+        self.declare_parameter('publish_hz', 30.0)
+        self.declare_parameter('poll_hz', 100.0)
+        self.declare_parameter('rescan_s', 2.0)
+        self.declare_parameter('left_name_contains', ['left joy-con', 'joy-con (l)'])
+        self.declare_parameter('right_name_contains', ['right joy-con', 'joy-con (r)'])
+        self.declare_parameter('steer_side', 'left')           # which Joy-Con's stick steers
+        self.declare_parameter('steer_axis', 'ABS_X')
+        self.declare_parameter('button_side', 'right')         # which Joy-Con has A / B / R
+        self.declare_parameter('a_button', 'BTN_EAST')
+        self.declare_parameter('b_button', 'BTN_SOUTH')
+        self.declare_parameter('autonomy_button', 'BTN_TR')
 
-        p = lambda n: self.get_parameter(n).value
-        self.mixer = Mixer(MixerConfig(**{k: float(p(k)) for k in cfg.__dict__}))
-        self.left_names = [s.lower() for s in p('left_name_contains')]
-        self.right_names = [s.lower() for s in p('right_name_contains')]
-        self.steer_side = p('steer_side')
-        self.button_side = p('button_side')
+        self.mixer = Mixer(MixerConfig(**{k: float(self.get_parameter(k).value) for k in cfg.__dict__}))
+        self.left_names = [s.lower() for s in self.get_parameter('left_name_contains').value]
+        self.right_names = [s.lower() for s in self.get_parameter('right_name_contains').value]
+        self.steer_side = self.get_parameter('steer_side').value
+        self.button_side = self.get_parameter('button_side').value
 
         self.devices = {}      # 'left' / 'right' -> InputDevice
         self.axis_norm = {}    # side -> (mid, half) for the steering axis
@@ -75,22 +154,22 @@ class JoyconTeleop(Node):
         if evdev is None:
             self.get_logger().error('python3-evdev is not installed; no Joy-Con input')
         else:
-            self.steer_code = ecodes.ecodes.get(p('steer_axis'))
-            self.a_code = ecodes.ecodes.get(p('a_button'))
-            self.b_code = ecodes.ecodes.get(p('b_button'))
-            self.r_code = ecodes.ecodes.get(p('autonomy_button'))
+            self.steer_code = ecodes.ecodes.get(self.get_parameter('steer_axis').value)
+            self.a_code = ecodes.ecodes.get(self.get_parameter('a_button').value)
+            self.b_code = ecodes.ecodes.get(self.get_parameter('b_button').value)
+            self.r_code = ecodes.ecodes.get(self.get_parameter('autonomy_button').value)
             for name, code in (('steer_axis', self.steer_code), ('a_button', self.a_code),
                                ('b_button', self.b_code), ('autonomy_button', self.r_code)):
                 if code is None:
-                    self.get_logger().error(f'unknown evdev name for {name}: {p(name)}')
+                    self.get_logger().error(f'unknown evdev name for {name}: {self.get_parameter(name).value}')
 
         self.cmd_pub = self.create_publisher(Float32MultiArray, '/drive_cmd', 10)
         self.mode_pub = self.create_publisher(String, '/drive_mode', 10)
         self.create_subscription(AckermannDriveStamped, '/drive', self._on_drive, 10)
 
-        self.create_timer(1.0 / float(p('poll_hz')), self._poll)
-        self.create_timer(float(p('rescan_s')), self._scan)
-        self.create_timer(1.0 / float(p('publish_hz')), self._publish)
+        self.create_timer(1.0 / float(self.get_parameter('poll_hz').value), self._poll)
+        self.create_timer(float(self.get_parameter('rescan_s').value), self._scan)
+        self.create_timer(1.0 / float(self.get_parameter('publish_hz').value), self._publish)
         self._scan()
         self.get_logger().info('joycon_teleop up (waiting for Joy-Cons)')
 

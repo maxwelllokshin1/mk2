@@ -62,14 +62,14 @@ joycon_teleop:
 
     # ---- which Joy-Con / evdev names (verify with joycon_probe)
     steer_side: left
-    steer_axis: ABS_X
+    steer_axis: ABS_Y
     # ONE Joy-Con (left): stick steers, BTN_TR2 = forward, BTN_TR = reverse (names seen in joycon_probe;
     # swap them if forward/reverse feel backwards). BTN_SELECT (minus) = hold for autonomy, not yet probed.
     # Two Joy-Cons: button_side right, a_button BTN_EAST, b_button BTN_SOUTH, autonomy_button BTN_TR.
     button_side: left
-    a_button: BTN_TR2           # forward while held
-    b_button: BTN_TR            # reverse while held
-    autonomy_button: BTN_SELECT # minus
+    a_button: BTN_DPAD_DOWN  # forward while held
+    b_button: BTN_DPAD_LEFT  # reverse while held
+    autonomy_button: BTN_TR2 # top right bumper
 
 # =====================================================================================
 # OLED eyes (128x64 I2C, SSD1306). Image paths are relative to this config folder.
