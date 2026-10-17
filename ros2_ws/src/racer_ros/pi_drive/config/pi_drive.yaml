@@ -7,9 +7,9 @@
 gpio_driver:
   ros__parameters:
     # ---- PINS: BCM GPIO numbers (not header pin numbers). -1 = not connected.
-    # Both -1 -> DRY RUN (nothing moves). Servo only for now; set throttle_gpio (19 = header pin 35) when the ESC is wired.
+    # Both -1 -> DRY RUN (nothing moves). Steering = GPIO18, throttle = GPIO19 (hardware PWM). Set -1 to disable either.
     steer_gpio: 18              # header pin 12
-    throttle_gpio: -1
+    throttle_gpio: 19           # header pin 35 = hardware PWM channel 3 (needs dtoverlay=pwm-2chan)
     gpiochip: 0
     # Steering pulses: "auto" = hardware PWM (steady) if /sys/class/pwm/pwmchip2 is there, else software (jitters).
     # Needs dtoverlay=pwm-2chan in config.txt (pi_setup.sh adds it). Pi 5: chip 0 (older kernels: 2), channel 2 = GPIO18, 3 = GPIO19.
