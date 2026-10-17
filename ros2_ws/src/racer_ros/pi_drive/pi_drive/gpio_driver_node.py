@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import os
 import signal
 import time
 
@@ -7,11 +8,71 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32MultiArray
-import RPi.GPIO as GPIO
 
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
+
+
+class HwPwm:
+    """Hardware PWM through sysfs (Pi 5: GPIO18 = pwmchip2 channel 2, needs dtoverlay=pwm-2chan).
+    The RP1 chip generates the pulses, so CPU load cannot make them jitter."""
+
+    def __init__(self, chip, channel, hz, start_us):
+        self.base = f'/sys/class/pwm/pwmchip{chip}'
+        self.ch = f'{self.base}/pwm{channel}'
+        if not os.path.isdir(self.ch):
+            self._write(f'{self.base}/export', channel)
+            for _ in range(50):
+                if os.path.isdir(self.ch):
+                    break
+                time.sleep(0.02)
+        self._write(f'{self.ch}/duty_cycle', 0)   # duty must stay <= period while changing it
+        self._write(f'{self.ch}/period', int(1e9 / hz))
+        self.set_us(start_us)
+        self._write(f'{self.ch}/enable', 1)
+
+    @staticmethod
+    def _write(path, value):
+        for _ in range(50):   # udev may still be fixing permissions right after export
+            try:
+                with open(path, 'w') as f:
+                    f.write(str(int(value)))
+                return
+            except PermissionError:
+                time.sleep(0.04)
+        with open(path, 'w') as f:
+            f.write(str(int(value)))
+
+    def set_us(self, us):
+        self._write(f'{self.ch}/duty_cycle', us * 1000)
+
+    def stop(self):
+        self._write(f'{self.ch}/enable', 0)
+
+
+class SoftPwm:
+    """Fallback: lgpio software timing through the RPi.GPIO shim (jitters when the CPU is busy)."""
+
+    def __init__(self, pin, hz, start_us):
+        import RPi.GPIO as GPIO
+        self.GPIO = GPIO
+        self.hz = hz
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(pin, GPIO.OUT)
+        self.pwm = GPIO.PWM(pin, hz)
+        self.pwm.start(self._duty(start_us))
+
+    def _duty(self, us):
+        return us * self.hz / 1e6 * 100.0
+
+    def set_us(self, us):
+        self.pwm.ChangeDutyCycle(self._duty(us))
+
+    def stop(self):
+        self.pwm.stop()
+        self.pwm = None          # drop it BEFORE cleanup(), or PWM.__del__ hits a closed chip
+        self.GPIO.cleanup()
 
 
 class GpioDriver(Node):
@@ -21,7 +82,10 @@ class GpioDriver(Node):
         # ---- parameters (names match pi_drive.yaml; floats MUST be floats there) ----
         self.declare_parameter('steer_gpio', -1)             # BCM number, -1 = not connected
         self.declare_parameter('throttle_gpio', -1)          # unused for now
-        self.declare_parameter('gpiochip', 0)                # unused with RPi.GPIO
+        self.declare_parameter('gpiochip', 0)                # unused
+        self.declare_parameter('pwm_backend', 'auto')        # auto | hw | soft
+        self.declare_parameter('pwm_chip', 2)                # Pi 5: pwmchip2
+        self.declare_parameter('pwm_channel', 2)             # Pi 5: channel 2 = GPIO18, 3 = GPIO19
         self.declare_parameter('pwm_hz', 50.0)
         self.declare_parameter('command_timeout_s', 0.5)
         self.declare_parameter('steer_center_us', 1500.0)
@@ -37,6 +101,9 @@ class GpioDriver(Node):
         self.steer_pin = int(p('steer_gpio').value)
         self.throttle_pin = int(p('throttle_gpio').value)
         self.pwm_hz = float(p('pwm_hz').value)
+        self.pwm_backend = str(p('pwm_backend').value)
+        self.pwm_chip = int(p('pwm_chip').value)
+        self.pwm_channel = int(p('pwm_channel').value)
         self.timeout = float(p('command_timeout_s').value)
         self.steer_center = float(p('steer_center_us').value)
         self.steer_range = float(p('steer_range_us').value)
@@ -63,10 +130,7 @@ class GpioDriver(Node):
         if self.dry:
             self.get_logger().warn('steer_gpio is -1: DRY RUN, nothing will move')
         else:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.steer_pin, GPIO.OUT)
-            self.pwm = GPIO.PWM(self.steer_pin, self.pwm_hz)
-            self.pwm.start(self._us_to_duty(self.steer_center))  # start centered
+            self.pwm = self._open_pwm()
 
         # ---- ROS io ----
         self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
@@ -75,14 +139,22 @@ class GpioDriver(Node):
         self.create_timer(0.05, self._publish_odom)  # 20 Hz odom
 
         self.get_logger().info(
-            f'GPIO DRIVER ON: steer_gpio={self.steer_pin} '
+            f'GPIO DRIVER ON: steer_gpio={self.steer_pin} pwm={type(self.pwm).__name__ if self.pwm else "none"} '
             f'(center {self.steer_center:.0f}us, +-{self.steer_range:.0f}us, '
             f'clamp {self.steer_min:.0f}-{self.steer_max:.0f}us)')
 
     # ---------------- helpers ----------------
-    def _us_to_duty(self, us):
-        # duty % = pulse_us / period_us * 100, period_us = 1e6 / hz
-        return us * self.pwm_hz / 1e6 * 100.0
+    def _open_pwm(self):
+        """Hardware PWM when the sysfs channel is there, else software (backend 'auto')."""
+        if self.pwm_backend in ('auto', 'hw'):
+            try:
+                return HwPwm(self.pwm_chip, self.pwm_channel, self.pwm_hz, self.steer_center)
+            except OSError as e:
+                if self.pwm_backend == 'hw':
+                    raise
+                self.get_logger().warn(
+                    f'hardware PWM unavailable ({e}); using software PWM (will jitter)')
+        return SoftPwm(self.steer_pin, self.pwm_hz, self.steer_center)
 
     def _steering_to_us(self, steering):
         us = self.steer_center + self.steer_sign * steering * self.steer_range
@@ -90,13 +162,13 @@ class GpioDriver(Node):
 
     def _apply_steering(self, steering):
         us = self._steering_to_us(steering)
-        if self.last_us is not None and abs(us - self.last_us) < 0.5:
-            return  # no change, don't touch the PWM
+        if self.last_us is not None and abs(us - self.last_us) < 2.0:
+            return  # stick noise, don't touch the PWM
         self.last_us = us
         if self.dry:
             self.get_logger().info(f'[dry] steer={us:.0f}us', throttle_duration_sec=1.0)
         else:
-            self.pwm.ChangeDutyCycle(self._us_to_duty(us))
+            self.pwm.set_us(us)
 
     # ---------------- callbacks ----------------
     def _on_cmd(self, msg):
@@ -148,12 +220,9 @@ class GpioDriver(Node):
             return
         self.closed = True
         if self.pwm is not None:
-            try:
-                self.pwm.ChangeDutyCycle(self._us_to_duty(self.steer_center))
-                time.sleep(0.3)
-                self.pwm.stop()
-            finally:
-                GPIO.cleanup()
+            self.pwm.set_us(self.steer_center)
+            time.sleep(0.3)
+            self.pwm.stop()
 
 
 def main(args=None):

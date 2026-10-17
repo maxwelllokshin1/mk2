@@ -44,6 +44,8 @@ services:
       - "c 13:* rmw"
     volumes:
       - /dev/input:/dev/input
+      # hardware PWM for the steering servo is driven through sysfs (group gpio can write the pwm files)
+      - /sys:/sys
       # edit pins / tuning / eye images / the YOLO model on the Pi without rebuilding the image:
       - ./ros2_ws/src/racer_ros/pi_drive/config:/ws/install/pi_drive/share/pi_drive/config:ro
     logging:

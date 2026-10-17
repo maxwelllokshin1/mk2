@@ -11,6 +11,11 @@ gpio_driver:
     steer_gpio: 18              # header pin 12
     throttle_gpio: -1
     gpiochip: 0
+    # Steering pulses: "auto" = hardware PWM (steady) if /sys/class/pwm/pwmchip2 is there, else software (jitters).
+    # Needs dtoverlay=pwm-2chan in config.txt (pi_setup.sh adds it). Pi 5: chip 2, channel 2 = GPIO18, 3 = GPIO19.
+    pwm_backend: auto
+    pwm_chip: 2
+    pwm_channel: 2
 
     command_timeout_s: 0.5      # no /drive_cmd for this long -> steering centered, throttle neutral
     arm_time_s: 3.0             # ESC held at neutral this long after start
