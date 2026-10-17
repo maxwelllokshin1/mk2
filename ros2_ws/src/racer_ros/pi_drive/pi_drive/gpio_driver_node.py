@@ -84,7 +84,7 @@ class GpioDriver(Node):
         self.declare_parameter('throttle_gpio', -1)          # unused for now
         self.declare_parameter('gpiochip', 0)                # unused
         self.declare_parameter('pwm_backend', 'auto')        # auto | hw | soft
-        self.declare_parameter('pwm_chip', 2)                # Pi 5: pwmchip2
+        self.declare_parameter('pwm_chip', 0)                # Pi 5 kernel 6.18: pwmchip0 (older: 2)
         self.declare_parameter('pwm_channel', 2)             # Pi 5: channel 2 = GPIO18, 3 = GPIO19
         self.declare_parameter('pwm_hz', 50.0)
         self.declare_parameter('command_timeout_s', 0.5)
