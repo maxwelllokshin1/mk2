@@ -2,9 +2,9 @@
 """
 joycon_teleop_node: Joy-Cons (read straight from Linux evdev) -> /drive_cmd
 
-    left Joy-Con stick   steering
-    A (right Joy-Con)    drive forward while held
-    B (right Joy-Con)    reverse while held
+    stick, one axis      steering (steer_axis)
+    stick, other axis    drive: up = forward, down = reverse, proportional (throttle_axis).
+                         With throttle_axis empty, buttons A / B drive instead.
     R (top right)        HOLD = autonomy: follows /drive from reactive_node.
                          Let go = back to RC immediately.
 
@@ -52,8 +52,10 @@ def apply_deadzone(v, dz):
 class MixerConfig:
     steer_deadzone: float = 0.12
     steer_sign: float = -1.0           # raw stick axis -> + = left. Flip if steering is backwards
-    rc_forward: float = 0.30           # throttle while A is held
+    rc_forward: float = 0.30           # max forward throttle (stick fully forward, or while A is held)
     rc_reverse: float = 0.25           # throttle (magnitude) while B is held
+    throttle_deadzone: float = 0.12    # stick deadzone for the drive axis
+    throttle_sign: float = 1.0         # raw drive axis -> + = forward. Flip if up drives backwards
     auto_throttle: float = 0.25        # fixed autonomy throttle; only used when auto_speed_ref_mps <= 0
     auto_speed_ref_mps: float = 15.0   # reactive_node speed that maps to auto_max_throttle. Set = gap_params speed_max (>0 = follow its speed)
     auto_max_throttle: float = 0.25    # THE autonomy speed ceiling: raise as the car proves itself
@@ -69,6 +71,8 @@ class Inputs:
     have_steer: bool = False   # the Joy-Con with the steering stick is connected
     have_buttons: bool = False # the Joy-Con with A / B / R is connected
     stick: float = 0.0         # raw steering axis, -1..1
+    throttle_stick: float = 0.0  # raw drive axis, -1..1
+    use_axis_throttle: bool = False  # drive from throttle_stick instead of the A / B buttons
     a: bool = False
     b: bool = False
     r: bool = False
@@ -109,7 +113,12 @@ class Mixer:
             steering = clamp(c.steer_sign * apply_deadzone(inp.stick, c.steer_deadzone), -1.0, 1.0) + 0.0  # + 0.0 turns -0.0 into 0.0
 
         throttle = 0.0
-        if inp.have_buttons:
+        if inp.use_axis_throttle:
+            if inp.have_steer:
+                t = c.throttle_sign * apply_deadzone(inp.throttle_stick, c.throttle_deadzone)
+                throttle = t * c.rc_forward if t > 0 else t * c.rc_reverse
+                throttle = clamp(throttle, -c.rc_reverse, c.rc_forward) + 0.0
+        elif inp.have_buttons:
             if inp.a and not inp.b:
                 throttle = c.rc_forward
             elif inp.b and not inp.a:
@@ -131,6 +140,7 @@ class JoyconTeleop(Node):
         self.declare_parameter('right_name_contains', ['right joy-con', 'joy-con (r)'])
         self.declare_parameter('steer_side', 'left')           # which Joy-Con's stick steers
         self.declare_parameter('steer_axis', 'ABS_X')
+        self.declare_parameter('throttle_axis', '')            # '' = drive with the A / B buttons
         self.declare_parameter('button_side', 'right')         # which Joy-Con has A / B / R
         self.declare_parameter('a_button', 'BTN_EAST')
         self.declare_parameter('b_button', 'BTN_SOUTH')
@@ -151,10 +161,15 @@ class JoyconTeleop(Node):
         self.auto_time = None
         self.mode = None
 
+        self.throttle_code = None
         if evdev is None:
             self.get_logger().error('python3-evdev is not installed; no Joy-Con input')
         else:
             self.steer_code = ecodes.ecodes.get(self.get_parameter('steer_axis').value)
+            thr_axis = self.get_parameter('throttle_axis').value
+            self.throttle_code = ecodes.ecodes.get(thr_axis) if thr_axis else None
+            if thr_axis and self.throttle_code is None:
+                self.get_logger().error(f'unknown evdev name for throttle_axis: {thr_axis}')
             self.a_code = ecodes.ecodes.get(self.get_parameter('a_button').value)
             self.b_code = ecodes.ecodes.get(self.get_parameter('b_button').value)
             self.r_code = ecodes.ecodes.get(self.get_parameter('autonomy_button').value)
@@ -216,12 +231,17 @@ class JoyconTeleop(Node):
                 continue
             os.set_blocking(dev.fd, False)
             self.devices[side] = dev
-            if side == self.steer_side and self.steer_code is not None:
-                info = dev.absinfo(self.steer_code)
-                if info is None:
-                    self.get_logger().error(f'{dev.name} has no axis {self.get_parameter("steer_axis").value}')
-                else:
-                    self.axis_norm[side] = ((info.max + info.min) / 2.0, max((info.max - info.min) / 2.0, 1.0))
+            if side == self.steer_side:
+                norms = {}
+                for code in (self.steer_code, self.throttle_code):
+                    if code is None:
+                        continue
+                    info = dev.absinfo(code)
+                    if info is None:
+                        self.get_logger().error(f'{dev.name} has no axis with code {code}')
+                    else:
+                        norms[code] = ((info.max + info.min) / 2.0, max((info.max - info.min) / 2.0, 1.0))
+                self.axis_norm[side] = norms
             self.get_logger().info(f'connected {side}: {dev.name} ({path})')
 
     def _drop(self, side):
@@ -235,6 +255,7 @@ class JoyconTeleop(Node):
         self.axis_norm.pop(side, None)
         if side == self.steer_side:
             self.inputs.stick = 0.0
+            self.inputs.throttle_stick = 0.0
         if side == self.button_side:
             self.inputs.a = self.inputs.b = self.inputs.r = False
 
@@ -250,9 +271,13 @@ class JoyconTeleop(Node):
                 self._drop(side)
 
     def _handle(self, side, ev):
-        if ev.type == ecodes.EV_ABS and side == self.steer_side and ev.code == self.steer_code:
-            mid, half = self.axis_norm.get(side, (0.0, 32767.0))
-            self.inputs.stick = clamp((ev.value - mid) / half, -1.0, 1.0)
+        if ev.type == ecodes.EV_ABS and side == self.steer_side and ev.code in (self.steer_code, self.throttle_code):
+            mid, half = self.axis_norm.get(side, {}).get(ev.code, (0.0, 32767.0))
+            value = clamp((ev.value - mid) / half, -1.0, 1.0)
+            if ev.code == self.steer_code:
+                self.inputs.stick = value
+            else:
+                self.inputs.throttle_stick = value
         elif ev.type == ecodes.EV_KEY and side == self.button_side:
             down = ev.value != 0
             if ev.code == self.a_code:
@@ -266,6 +291,7 @@ class JoyconTeleop(Node):
     def _publish(self):
         self.inputs.have_steer = self.steer_side in self.devices
         self.inputs.have_buttons = self.button_side in self.devices
+        self.inputs.use_axis_throttle = self.throttle_code is not None
         age = (self.get_clock().now() - self.auto_time).nanoseconds / 1e9 if self.auto_time else float('inf')
         steering, throttle, mode = self.mixer.mix(self.inputs, self.auto_steer, self.auto_speed, age)
 

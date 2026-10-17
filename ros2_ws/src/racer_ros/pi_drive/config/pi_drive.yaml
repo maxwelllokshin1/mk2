@@ -19,7 +19,7 @@ gpio_driver:
 
     command_timeout_s: 0.5      # no /drive_cmd for this long -> steering centered, throttle neutral
     arm_time_s: 3.0             # ESC held at neutral this long after start
-    throttle_slew_per_s: 2.0    # how fast throttle may ramp up (1.0 = full in 0.5 s)
+    throttle_slew_per_s: 0.3    # how fast throttle may ramp up (1.0 = full in 1/value s). 0.3 = 1 s to reach 0.3 throttle
     reverse_neutral_s: 0.25     # forward <-> reverse waits this long at neutral
 
     # ---- steering servo (all PLACEHOLDERS: measure your servo, start with small ranges)
@@ -62,10 +62,13 @@ joycon_teleop:
 
     # ---- which Joy-Con / evdev names (verify with joycon_probe)
     steer_side: left
-    steer_axis: ABS_Y
-    # ONE Joy-Con (left): stick steers, BTN_TR2 = forward, BTN_TR = reverse (names seen in joycon_probe;
-    # swap them if forward/reverse feel backwards). BTN_SELECT (minus) = hold for autonomy, not yet probed.
-    # Two Joy-Cons: button_side right, a_button BTN_EAST, b_button BTN_SOUTH, autonomy_button BTN_TR.
+    steer_axis: ABS_Y           # stick left/right (Joy-Con held sideways)
+    throttle_axis: ABS_X        # stick up = forward, down = reverse, proportional. '' = use the A / B buttons instead
+    throttle_deadzone: 0.15     # stick must pass this before the motor gets any throttle
+    throttle_sign: 1.0          # flip to -1.0 if pushing up drives backwards
+    # Stick drive: speed follows how far you push, up to rc_forward / rc_reverse. The driver ramps it in
+    # slowly (throttle_slew_per_s under gpio_driver); letting go stops at once.
+    # Buttons below are used only when throttle_axis is '':
     button_side: left
     a_button: BTN_DPAD_DOWN  # forward while held
     b_button: BTN_DPAD_LEFT  # reverse while held
