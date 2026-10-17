@@ -1,0 +1,18 @@
+# Auto-connects paired Joy-Cons to the Pi after boot (press any button on the Joy-Con).
+#
+# Install on the Pi (host, not in the container):
+#   sudo cp scripts/pi/joycon-autoconnect.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now joycon-autoconnect
+#   journalctl -u joycon-autoconnect -f
+[Unit]
+Description=Auto-connect paired Joy-Cons
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+ExecStart=/home/maxwelllokshin/mk2/scripts/pi/joycon-autoconnect.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
