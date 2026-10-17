@@ -63,10 +63,13 @@ joycon_teleop:
     # ---- which Joy-Con / evdev names (verify with joycon_probe)
     steer_side: left
     steer_axis: ABS_X
-    button_side: right
-    a_button: BTN_EAST
-    b_button: BTN_SOUTH
-    autonomy_button: BTN_TR     # R (top right shoulder button)
+    # ONE Joy-Con (left): stick steers, ZL = forward, L = reverse, minus = hold for autonomy.
+    # Names are a best guess for the kernel's hid-nintendo; confirm with joycon_probe (see README).
+    # Two Joy-Cons: button_side right, a_button BTN_EAST, b_button BTN_SOUTH, autonomy_button BTN_TR.
+    button_side: left
+    a_button: BTN_TL2           # ZL (trigger)
+    b_button: BTN_TL            # L (shoulder)
+    autonomy_button: BTN_SELECT # minus
 
 # =====================================================================================
 # OLED eyes (128x64 I2C, SSD1306). Image paths are relative to this config folder.
