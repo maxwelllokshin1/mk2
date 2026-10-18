@@ -1,0 +1,6 @@
+# Added automatically by scripts/pi/car.sh when /dev/ttyUSB0 exists (RPLIDAR on USB).
+# Kept out of docker-compose.pi.yml because docker refuses to start the container if a listed device is missing.
+services:
+  racer:
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0      # group dialout is already in group_add

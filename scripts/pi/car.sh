@@ -4,6 +4,7 @@
 #   scripts/pi/car.sh setup       one time: camera stream service + your group ids
 #   scripts/pi/car.sh eyes        OLED + camera person tracking, in this terminal (Ctrl+C stops)
 #   scripts/pi/car.sh servo       Joy-Con + servo only (no OLED / camera), in this terminal
+#   scripts/pi/car.sh auto        autonomy test: LiDAR + autonomy + dashboard, no OLED / camera, in this terminal
 #   scripts/pi/car.sh car         EVERYTHING, in the background (restarts on boot)
 #   scripts/pi/car.sh stop        stop whatever is running
 #   scripts/pi/car.sh logs        watch the background car
@@ -16,6 +17,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."          # repo root, so it works from any folder
 
 COMPOSE=(docker compose -f docker-compose.pi.yml)
+[ -e /dev/ttyUSB0 ] && COMPOSE+=(-f docker-compose.lidar.yml)   # RPLIDAR plugged in
 LAUNCH=(ros2 launch pi_drive pi_drive.launch.py)
 IMAGE=airacer:pi
 OLED_PY="${OLED_PY:-$HOME/oled/bin/python}"
@@ -75,6 +77,7 @@ case "$cmd" in
   setup)  setup ;;
   eyes)   launch_fg lidar:=false autonomy:=false dashboard:=false ;;
   servo)  launch_fg lidar:=false autonomy:=false dashboard:=false person:=false oled:=false ;;
+  auto)   launch_fg oled:=false person:=false ;;
   car)    stop_all; preflight; run "${COMPOSE[@]}" up -d
           echo "car is running in the background.  scripts/pi/car.sh logs | status | stop" ;;
   stop)   stop_all; echo "stopped" ;;
@@ -84,5 +87,5 @@ case "$cmd" in
              echo "(the car is stopped. Restart it with:  scripts/pi/car.sh car)" ;;
   oled-anim) stop_all; run "$OLED_PY" scripts/pi/oled_animate.py "$@"
              echo "(the car is stopped. Restart it with:  scripts/pi/car.sh car)" ;;
-  *)      sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *)      sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
 esac

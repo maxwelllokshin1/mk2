@@ -376,7 +376,31 @@ class ReactiveFollowGap(Node):
         return processed_ranges #TODO: implement preprocessing
 
     
-    def lidar_callback(self, data): # 
+    def _normalize_scan(self, data):
+        """Make any scan look like the Hokuyo/sim one: angles increasing, 0 rad = straight ahead, in [-pi, pi].
+        RPLIDAR drivers publish from the back (angle_min = pi) with a NEGATIVE angle_increment; this undoes that.
+        A scan that is already normal is returned untouched."""
+        inc = data.angle_increment
+        if inc > 0 and data.angle_min <= 0.0 <= data.angle_max:
+            return data
+        n = len(data.ranges)
+        angles = data.angle_min + np.arange(n) * inc
+        angles = (angles + np.pi) % (2.0 * np.pi) - np.pi
+        order = np.argsort(angles)
+        out = LaserScan()
+        out.header = data.header
+        out.angle_min = float(angles[order[0]])
+        out.angle_max = float(angles[order[-1]])
+        out.angle_increment = float(abs(inc))
+        out.time_increment = data.time_increment
+        out.scan_time = data.scan_time
+        out.range_min = data.range_min
+        out.range_max = data.range_max
+        out.ranges = np.asarray(data.ranges, dtype=np.float32)[order].tolist()
+        return out
+
+    def lidar_callback(self, data): #
+        data = self._normalize_scan(data)
         ranges = np.array(data.ranges)
         # ------------------------ {PROCESSING} ------------------------
 

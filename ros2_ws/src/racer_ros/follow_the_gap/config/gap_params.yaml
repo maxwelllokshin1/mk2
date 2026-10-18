@@ -41,7 +41,7 @@ reactive_node:
     recovery_max_time: 6.0
 
     enable_dynamic_scaling: true
-    lidar_hw_range_m: 10.0        # your lidar's real max reliable range (Hokuyo UST-10LX ~10m); only clips the measurement, never the driving values
+    lidar_hw_range_m: 10.0        # your lidar's real max reliable range (Hokuyo UST-10LX ~10m, RPLIDAR A1M8 ~12m, ~8m is more reliable indoors); only clips the measurement, never the driving values
     reference_corridor_m: 2.0     # corridor width (m) the values above were tuned for — measure your usual test track
     min_track_scale: 0.4          # floor: how much a tiny track can shrink everything
     max_track_scale: 1.8          # ceiling: how much a huge track can grow everything — lower this before a real (non-sim) speed_max test, see mcu_bridge's own hard speed clamp too
