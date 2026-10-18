@@ -30,8 +30,10 @@ gpio_driver:
     steer_max_us: 1700.0
     # Recenter overshoot (loose linkage): returning to center after a turn, go slightly past center to the
     # other side first, hold for recenter_overshoot_s, then settle on center. Bigger turn = bigger kick,
-    # up to recenter_overshoot_us. Set recenter_overshoot_us to 0.0 to turn it off.
-    recenter_overshoot_us: 40.0
+    # up to the per-side maximum below. LEFT / RIGHT = the way the wheels turned before returning.
+    # Right side stops short -> raise the right value; set a side to 0.0 to turn its kick off.
+    recenter_overshoot_left_us: 40.0
+    recenter_overshoot_right_us: 80.0
     recenter_overshoot_s: 0.15
     recenter_min_deflection_us: 50.0   # turns smaller than this (from center) do not kick
 

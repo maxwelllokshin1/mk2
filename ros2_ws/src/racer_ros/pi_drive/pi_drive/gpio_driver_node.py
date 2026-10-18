@@ -103,7 +103,8 @@ class GpioDriver(Node):
         self.declare_parameter('steer_sign', 1.0)
         self.declare_parameter('steer_min_us', 1300.0)
         self.declare_parameter('steer_max_us', 1700.0)
-        self.declare_parameter('recenter_overshoot_us', 40.0)      # 0 = off
+        self.declare_parameter('recenter_overshoot_left_us', 40.0)    # kick after a LEFT turn (0 = off)
+        self.declare_parameter('recenter_overshoot_right_us', 80.0)   # kick after a RIGHT turn (0 = off)
         self.declare_parameter('recenter_overshoot_s', 0.15)
         self.declare_parameter('recenter_min_deflection_us', 50.0)
         self.declare_parameter('throttle_neutral_us', 1500.0)
@@ -130,7 +131,8 @@ class GpioDriver(Node):
         self.steer_sign = float(p('steer_sign').value)
         self.steer_min = float(p('steer_min_us').value)
         self.steer_max = float(p('steer_max_us').value)
-        self.overshoot_us = float(p('recenter_overshoot_us').value)
+        self.overshoot_left = float(p('recenter_overshoot_left_us').value)
+        self.overshoot_right = float(p('recenter_overshoot_right_us').value)
         self.overshoot_s = float(p('recenter_overshoot_s').value)
         self.overshoot_min = float(p('recenter_min_deflection_us').value)
         self.thr_neutral = float(p('throttle_neutral_us').value)
@@ -238,8 +240,10 @@ class GpioDriver(Node):
         if centered:
             # Back to center after a real turn: go slightly PAST center first (the linkage has slack and
             # otherwise stops short), hold briefly, then settle on center.
-            if (self.kick_until == 0.0 and self.overshoot_us > 0.0 and abs(self.peak_off) >= self.overshoot_min):
-                amount = self.overshoot_us * min(1.0, abs(self.peak_off) / (0.5 * self.steer_range))
+            # steering > 0 is a LEFT turn (same convention as the rest of the car), whatever steer_sign is
+            max_us = self.overshoot_left if self.peak_off * self.steer_sign > 0 else self.overshoot_right
+            if (self.kick_until == 0.0 and max_us > 0.0 and abs(self.peak_off) >= self.overshoot_min):
+                amount = max_us * min(1.0, abs(self.peak_off) / (0.5 * self.steer_range))
                 self.kick_us = clamp(self.steer_center - math.copysign(amount, self.peak_off),
                                      self.steer_min, self.steer_max)
                 self.kick_until = now + self.overshoot_s
