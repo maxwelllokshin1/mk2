@@ -103,6 +103,9 @@ class GpioDriver(Node):
         self.declare_parameter('steer_sign', 1.0)
         self.declare_parameter('steer_min_us', 1300.0)
         self.declare_parameter('steer_max_us', 1700.0)
+        self.declare_parameter('recenter_overshoot_us', 40.0)      # 0 = off
+        self.declare_parameter('recenter_overshoot_s', 0.15)
+        self.declare_parameter('recenter_min_deflection_us', 50.0)
         self.declare_parameter('throttle_neutral_us', 1500.0)
         self.declare_parameter('throttle_deadband_us', 25.0)
         self.declare_parameter('throttle_fwd_max_us', 1700.0)
@@ -127,6 +130,9 @@ class GpioDriver(Node):
         self.steer_sign = float(p('steer_sign').value)
         self.steer_min = float(p('steer_min_us').value)
         self.steer_max = float(p('steer_max_us').value)
+        self.overshoot_us = float(p('recenter_overshoot_us').value)
+        self.overshoot_s = float(p('recenter_overshoot_s').value)
+        self.overshoot_min = float(p('recenter_min_deflection_us').value)
         self.thr_neutral = float(p('throttle_neutral_us').value)
         self.thr_deadband = float(p('throttle_deadband_us').value)
         self.thr_fwd_max = float(p('throttle_fwd_max_us').value)
@@ -145,6 +151,9 @@ class GpioDriver(Node):
         self.last_dir = 0                    # sign of the last non-zero throttle (for fwd<->rev pause)
         self.neutral_since = self._now_s()
         self.last_us = None
+        self.peak_off = 0.0                  # biggest steering offset (us) since the wheel was last centered
+        self.kick_until = 0.0                # recentering overshoot is active until this time
+        self.kick_us = None
         self.last_thr_us = None
         self.armed = False
         self.arm_until = self._now_s() + self.arm_time
@@ -221,8 +230,32 @@ class GpioDriver(Node):
         hi = self.thr_neutral - self.thr_deadband
         return clamp(hi + t * (hi - self.thr_rev_min), self.thr_rev_min, hi)
 
-    def _apply_steering(self, steering):
+    def _apply_steering(self, steering, now):
         us = self._steering_to_us(steering)
+        off = us - self.steer_center
+        centered = abs(off) <= 10.0
+
+        if centered:
+            # Back to center after a real turn: go slightly PAST center first (the linkage has slack and
+            # otherwise stops short), hold briefly, then settle on center.
+            if (self.kick_until == 0.0 and self.overshoot_us > 0.0 and abs(self.peak_off) >= self.overshoot_min):
+                amount = self.overshoot_us * min(1.0, abs(self.peak_off) / (0.5 * self.steer_range))
+                self.kick_us = clamp(self.steer_center - math.copysign(amount, self.peak_off),
+                                     self.steer_min, self.steer_max)
+                self.kick_until = now + self.overshoot_s
+            self.peak_off = 0.0
+            if self.kick_until > 0.0:
+                if now < self.kick_until:
+                    us = self.kick_us
+                else:
+                    self.kick_until = 0.0          # kick done: settle on center
+        else:
+            self.kick_until = 0.0                  # moved away from center: no kick
+            if self.peak_off * off < 0.0:
+                self.peak_off = 0.0                # went through center to the other side
+            if abs(off) > abs(self.peak_off):
+                self.peak_off = off
+
         if self.last_us is not None and abs(us - self.last_us) < 2.0:
             return  # stick noise, don't touch the PWM
         self.last_us = us
@@ -292,7 +325,7 @@ class GpioDriver(Node):
                 self.get_logger().info('/drive_cmd received')
 
         self.steer_applied = steering
-        self._apply_steering(steering)
+        self._apply_steering(steering, now)
         self._update_throttle(throttle, stale, now, dt)
 
     def _publish_odom(self):

@@ -28,6 +28,12 @@ gpio_driver:
     steer_sign: 1.0             # flip to -1.0 if left turns right
     steer_min_us: 1300.0        # hard clamps, set just inside the mechanical end stops
     steer_max_us: 1700.0
+    # Recenter overshoot (loose linkage): returning to center after a turn, go slightly past center to the
+    # other side first, hold for recenter_overshoot_s, then settle on center. Bigger turn = bigger kick,
+    # up to recenter_overshoot_us. Set recenter_overshoot_us to 0.0 to turn it off.
+    recenter_overshoot_us: 40.0
+    recenter_overshoot_s: 0.15
+    recenter_min_deflection_us: 50.0   # turns smaller than this (from center) do not kick
 
     # ---- ESC (PLACEHOLDERS)
     throttle_neutral_us: 1500.0
