@@ -80,7 +80,8 @@ joycon_teleop:
     button_side: left
     a_button: BTN_DPAD_DOWN  # forward while held
     b_button: BTN_DPAD_LEFT  # reverse while held
-    autonomy_button: BTN_TR2 # top right bumper
+    autonomy_button: BTN_TR2 # hold it autonomy_toggle_hold_s to switch RC <-> AUTONOMOUS (it is no longer a deadman switch)
+    autonomy_toggle_hold_s: 3.0
 
 # =====================================================================================
 # OLED eyes (128x64 I2C, SSD1306). Image paths are relative to this config folder.

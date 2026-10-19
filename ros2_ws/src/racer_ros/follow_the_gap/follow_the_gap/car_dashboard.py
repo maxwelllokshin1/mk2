@@ -9,7 +9,7 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray, Empty as EmptyMsg
+from std_msgs.msg import Float32, Float32MultiArray, String, Empty as EmptyMsg
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 from rcl_interfaces.srv import SetParameters, GetParameters
@@ -147,6 +147,7 @@ class DashboardState:
             'lap_count': 0.0, 'lap_current': 0.0, 'lap_last': 0.0, 'lap_best': 0.0,
             'lidar_angle_min': 0.0, 'lidar_angle_inc': 0.0, 'pred_steering': 0.0,
             'pred_speed': 0.0, 'wheelbase': 0.25, 'max_lidar_range': 3.0, 'lidar_ranges': [],
+            'drive_mode': 'NO_TELEOP', 'controller': False, 'toggle_progress': 0.0,
         }
 
     def update(self, partial):
@@ -301,6 +302,12 @@ class CarDashboard(Node):
         self.sub = self.create_subscription(Float32MultiArray, '/car_info_debug', self.debug_callback, 10)
         self.lap_sub = self.create_subscription(Float32MultiArray, '/lap_info', self.lap_callback, 10)
         self.lidar_view_sub = self.create_subscription(Float32MultiArray, '/lidar_view', self.lidar_view_callback, 10)
+        # controller / mode from joycon_teleop: NO_CONTROLLER | RC | AUTO | AUTO_WAITING
+        self.mode_sub = self.create_subscription(String, '/drive_mode', self.mode_callback, 10)
+        self.progress_sub = self.create_subscription(Float32, '/mode_toggle_progress', self.progress_callback, 10)
+        self._mode = 'NO_TELEOP'
+        self._mode_time = 0.0
+        self.create_timer(0.5, self._mode_heartbeat)
 
         # live parameter tuning — talks to reactive_node's own standard
         # ROS2 parameter services, no custom IPC needed
@@ -409,6 +416,24 @@ class CarDashboard(Node):
             'best': best,
             't': time.time(),
         })
+
+    def mode_callback(self, msg):
+        # teleop publishes at ~30 Hz; only touch the shared state when the mode changes (heartbeat re-sends it)
+        self._mode_time = time.time()
+        if msg.data != self._mode:
+            self._mode = msg.data
+            state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP')})
+
+    def progress_callback(self, msg):
+        state.update({'toggle_progress': float(msg.data)})
+
+    def _mode_heartbeat(self):
+        # no /drive_mode for a while = teleop node is not running at all
+        if self._mode_time and time.time() - self._mode_time > 2.0:
+            self._mode = 'NO_TELEOP'
+        elif not self._mode_time:
+            self._mode = 'NO_TELEOP'
+        state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP')})
 
     def lap_callback(self, msg):
         lap_count, lap_current, lap_last, lap_best = msg.data

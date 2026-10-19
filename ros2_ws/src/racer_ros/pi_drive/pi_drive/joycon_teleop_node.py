@@ -5,8 +5,9 @@ joycon_teleop_node: Joy-Cons (read straight from Linux evdev) -> /drive_cmd
     stick, one axis      steering (steer_axis)
     stick, other axis    drive: up = forward, down = reverse, proportional (throttle_axis).
                          With throttle_axis empty, buttons A / B drive instead.
-    R (top right)        HOLD = autonomy: follows /drive from reactive_node.
-                         Let go = back to RC immediately.
+    autonomy button      HOLD 3 s = toggle RC <-> AUTONOMY (autonomy_toggle_hold_s). Starts in RC.
+                         In AUTONOMY the car follows /drive from reactive_node until you hold it
+                         for 3 s again. Losing the controller always drops back to RC.
 
 The Joy-Cons are paired on the Pi (bluetoothctl). The kernel's hid-nintendo
 driver turns each one into /dev/input/event*; this node finds them by name,
@@ -25,7 +26,7 @@ from dataclasses import dataclass
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray, String
+from std_msgs.msg import Float32, Float32MultiArray, String
 from ackermann_msgs.msg import AckermannDriveStamped
 
 try:
@@ -134,6 +135,7 @@ class JoyconTeleop(Node):
         for k, v in cfg.__dict__.items():
             self.declare_parameter(k, float(v))
         self.declare_parameter('publish_hz', 30.0)
+        self.declare_parameter('autonomy_toggle_hold_s', 3.0)   # hold the autonomy button this long to switch RC <-> AUTO
         self.declare_parameter('poll_hz', 100.0)
         self.declare_parameter('rescan_s', 2.0)
         self.declare_parameter('left_name_contains', ['left joy-con', 'joy-con (l)'])
@@ -160,6 +162,11 @@ class JoyconTeleop(Node):
         self.auto_speed = 0.0
         self.auto_time = None
         self.mode = None
+        self.auto_on = False        # toggled by holding the autonomy button; False = RC
+        self.btn_auto_down = False  # raw state of the autonomy button
+        self.auto_press_t = None    # when it went down
+        self.auto_toggled = False   # this press already toggled (no repeat until release)
+        self.toggle_hold_s = float(self.get_parameter('autonomy_toggle_hold_s').value)
 
         self.throttle_code = None
         if evdev is None:
@@ -180,6 +187,7 @@ class JoyconTeleop(Node):
 
         self.cmd_pub = self.create_publisher(Float32MultiArray, '/drive_cmd', 10)
         self.mode_pub = self.create_publisher(String, '/drive_mode', 10)
+        self.progress_pub = self.create_publisher(Float32, '/mode_toggle_progress', 10)
         self.create_subscription(AckermannDriveStamped, '/drive', self._on_drive, 10)
 
         self.create_timer(1.0 / float(self.get_parameter('poll_hz').value), self._poll)
@@ -258,6 +266,8 @@ class JoyconTeleop(Node):
             self.inputs.throttle_stick = 0.0
         if side == self.button_side:
             self.inputs.a = self.inputs.b = self.inputs.r = False
+            self._reset_auto_toggle()
+            self.get_logger().warn('controller lost: back to RC')
 
     # ---- reading ----
     def _poll(self):
@@ -285,13 +295,47 @@ class JoyconTeleop(Node):
             elif ev.code == self.b_code:
                 self.inputs.b = down
             elif ev.code == self.r_code:
-                self.inputs.r = down
+                if down and not self.btn_auto_down:
+                    self.auto_press_t = self._now_s()
+                    self.auto_toggled = False
+                elif not down:
+                    self.auto_press_t = None
+                    self.auto_toggled = False
+                    self.progress_pub.publish(Float32(data=0.0))
+                self.btn_auto_down = down
+
+    def _now_s(self):
+        return self.get_clock().now().nanoseconds / 1e9
+
+    def _reset_auto_toggle(self):
+        self.auto_on = False
+        self.btn_auto_down = False
+        self.auto_press_t = None
+        self.auto_toggled = False
+
+    def _update_auto_toggle(self):
+        """Holding the autonomy button for toggle_hold_s flips RC <-> AUTO once per press."""
+        if not (self.inputs.have_steer or self.inputs.have_buttons):
+            if self.auto_on or self.btn_auto_down:
+                self._reset_auto_toggle()
+            return
+        if self.btn_auto_down and self.auto_press_t is not None and not self.auto_toggled:
+            held = self._now_s() - self.auto_press_t
+            self.progress_pub.publish(Float32(data=float(min(1.0, held / self.toggle_hold_s))))
+            if held >= self.toggle_hold_s:
+                self.auto_on = not self.auto_on
+                self.auto_toggled = True
+                self.progress_pub.publish(Float32(data=1.0))
+                self.get_logger().info(f'autonomy button held {self.toggle_hold_s:.0f}s: switched to '
+                                       f'{"AUTONOMY" if self.auto_on else "RC"}')
 
     # ---- output ----
     def _publish(self):
         self.inputs.have_steer = self.steer_side in self.devices
         self.inputs.have_buttons = self.button_side in self.devices
         self.inputs.use_axis_throttle = self.throttle_code is not None
+        self._update_auto_toggle()
+        self.inputs.r = self.auto_on   # the mixer's "autonomy" flag is now the toggle, not the raw button
         age = (self.get_clock().now() - self.auto_time).nanoseconds / 1e9 if self.auto_time else float('inf')
         steering, throttle, mode = self.mixer.mix(self.inputs, self.auto_steer, self.auto_speed, age)
 

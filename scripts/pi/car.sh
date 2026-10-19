@@ -6,6 +6,7 @@
 #   scripts/pi/car.sh servo       Joy-Con + servo only (no OLED / camera), in this terminal
 #   scripts/pi/car.sh auto        autonomy test: LiDAR + autonomy + dashboard, no OLED / camera, in this terminal
 #   scripts/pi/car.sh car         EVERYTHING, in the background (restarts on boot)
+#   scripts/pi/car.sh boot        what the racer.service runs at power-on: wait for I2C / LiDAR, then 'car'
 #   scripts/pi/car.sh stop        stop whatever is running
 #   scripts/pi/car.sh logs        watch the background car
 #   scripts/pi/car.sh status      what is running, camera service, memory
@@ -15,6 +16,11 @@
 # DRY=1 scripts/pi/car.sh eyes     prints the commands instead of running them.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."          # repo root, so it works from any folder
+
+if [ "${1:-}" = boot ]; then          # right after power-on the I2C / USB devices may not exist yet
+  for _ in $(seq 30); do [ -e /dev/i2c-1 ] && break; sleep 1; done
+  for _ in $(seq 10); do [ -e /dev/ttyUSB0 ] && break; sleep 1; done
+fi
 
 COMPOSE=(docker compose -f docker-compose.pi.yml)
 [ -e /dev/ttyUSB0 ] && COMPOSE+=(-f docker-compose.lidar.yml)   # RPLIDAR plugged in
@@ -78,7 +84,7 @@ case "$cmd" in
   eyes)   launch_fg lidar:=false autonomy:=false dashboard:=false ;;
   servo)  launch_fg lidar:=false autonomy:=false dashboard:=false person:=false oled:=false ;;
   auto)   launch_fg oled:=false person:=false ;;
-  car)    stop_all; preflight; run "${COMPOSE[@]}" up -d
+  car|boot) stop_all; preflight; run "${COMPOSE[@]}" up -d
           echo "car is running in the background.  scripts/pi/car.sh logs | status | stop" ;;
   stop)   stop_all; echo "stopped" ;;
   logs)   run docker logs -f --tail 50 racer ;;

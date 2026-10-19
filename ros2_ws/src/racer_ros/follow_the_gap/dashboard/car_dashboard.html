@@ -73,6 +73,16 @@ header{
 .status-dot.dead{background:var(--red);box-shadow:0 0 8px var(--red);}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
 
+#ctrlPill .status-dot.warn{background:var(--amber);box-shadow:0 0 8px var(--amber);}
+.mode-chip{font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:0.12em;padding:2px 8px;border-radius:10px;border:1px solid var(--line-bright);color:var(--text-bright);}
+.mode-chip.rc{color:var(--cyan);border-color:var(--cyan);}
+.mode-chip.auto{color:var(--green);border-color:var(--green);}
+.mode-chip.wait{color:var(--amber);border-color:var(--amber);}
+.mode-chip.none{color:var(--red);border-color:var(--red);}
+.hold-bar{width:60px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;visibility:hidden;}
+.hold-bar.on{visibility:visible;}
+.hold-bar > div{height:100%;width:0%;background:var(--amber);}
+
 .clockbox{text-align:right;}
 .clock{font-family:'Orbitron',sans-serif;font-size:22px;font-weight:600;color:var(--text-bright);letter-spacing:0.05em;}
 .dateline{font-size:10px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;margin-top:2px;}
@@ -235,6 +245,12 @@ header{
       </div>
     </div>
     <div class="headerright">
+      <div class="status-pill" id="ctrlPill">
+        <div class="status-dot" id="ctrlDot"></div>
+        <span id="ctrlText">Controller —</span>
+        <span class="mode-chip none" id="modeChip">—</span>
+        <div class="hold-bar" id="holdBar" title="hold the autonomy button to switch mode"><div id="holdFill"></div></div>
+      </div>
       <div class="status-pill">
         <div class="status-dot" id="statusDot"></div>
         <span id="statusText">Connecting</span>
@@ -573,9 +589,35 @@ function fmtLapTime(s) {
   return m > 0 ? `${m}:${sec}` : `${sec}s`;
 }
 
+function applyControllerStatus(d) {
+  const mode = d.drive_mode || 'NO_TELEOP';
+  const dot = document.getElementById('ctrlDot');
+  const txt = document.getElementById('ctrlText');
+  const chip = document.getElementById('modeChip');
+  const connected = !!d.controller;
+  dot.className = 'status-dot ' + (connected ? 'live' : (mode === 'NO_TELEOP' ? 'warn' : 'dead'));
+  txt.textContent = connected ? 'Controller connected'
+                  : mode === 'NO_TELEOP' ? 'Teleop not running'
+                  : 'No controller';
+  const label = { RC: 'RC', AUTO: 'AUTONOMOUS', AUTO_WAITING: 'AUTO · WAITING FOR LIDAR',
+                  NO_CONTROLLER: 'WAITING', NO_TELEOP: 'OFFLINE' }[mode] || mode;
+  chip.textContent = label;
+  chip.className = 'mode-chip ' + (mode === 'RC' ? 'rc' : mode === 'AUTO' ? 'auto' : mode === 'AUTO_WAITING' ? 'wait' : 'none');
+  const prog = d.toggle_progress || 0;
+  const bar = document.getElementById('holdBar');
+  bar.className = 'hold-bar' + (prog > 0 && prog < 1 ? ' on' : '');
+  document.getElementById('holdFill').style.width = (prog * 100).toFixed(0) + '%';
+}
+
+let lastTelemetryT = null;
 function applyUpdate(d) {
-  lastMsgTime = Date.now();
-  msgCount++;
+  applyControllerStatus(d);
+  // the Live pill / msg rate only track real car telemetry, not the controller heartbeat
+  if (d.t !== lastTelemetryT) {
+    lastTelemetryT = d.t;
+    lastMsgTime = Date.now();
+    msgCount++;
+  }
 
   document.getElementById('lapCount').textContent = (d.lap_count || 0).toFixed(0);
   document.getElementById('lapCurrent').textContent = 'current ' + fmtLapTime(d.lap_current);

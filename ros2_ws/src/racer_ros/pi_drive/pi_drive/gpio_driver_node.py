@@ -7,7 +7,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, String
 
 # Pi 5 hardware PWM (dtoverlay=pwm-2chan): which pwmchip channel drives which BCM pin
 PIN_TO_CHANNEL = {12: 0, 13: 1, 18: 2, 19: 3}
@@ -158,7 +158,8 @@ class GpioDriver(Node):
         self.kick_us = None
         self.last_thr_us = None
         self.armed = False
-        self.arm_until = self._now_s() + self.arm_time
+        self.controller = False              # a Joy-Con is connected (teleop publishes /drive_mode)
+        self.arm_until = float('inf')        # ESC arming starts when the controller connects, not at boot
         self.last_tick = self._now_s()
         self.x = self.y = self.yaw = 0.0
         self.closed = False
@@ -178,6 +179,7 @@ class GpioDriver(Node):
 
         # ---- ROS io ----
         self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
+        self.create_subscription(String, '/drive_mode', self._on_mode, 10)
         self.odom_pub = self.create_publisher(Odometry, '/ego_racecar/odom', 10)
         self.create_timer(0.02, self._tick)          # 50 Hz control loop
         self.create_timer(0.05, self._publish_odom)  # 20 Hz odom
@@ -188,7 +190,7 @@ class GpioDriver(Node):
             f'clamp {self.steer_min:.0f}-{self.steer_max:.0f}us) | '
             f'throttle_gpio={self.throttle_pin} {"ON" if self.thr_pwm else "off"} '
             f'(neutral {self.thr_neutral:.0f}us, fwd<={self.thr_fwd_max:.0f}, rev>={self.thr_rev_min:.0f}), '
-            f'arming ESC for {self.arm_time:.1f}s')
+            f'idle until a controller connects, then arming ESC for {self.arm_time:.1f}s')
 
     # ---------------- helpers ----------------
     def _now_s(self):
@@ -271,7 +273,10 @@ class GpioDriver(Node):
     def _update_throttle(self, target, stale, now, dt):
         """Safe throttle: neutral while arming / stale, ramped up, paused at neutral between forward and reverse."""
         cur = self.throttle_applied
-        if not self.armed:
+        if not self.controller:
+            self.armed = False
+            stale = True                                     # no controller: hold neutral
+        elif not self.armed:
             if now >= self.arm_until:
                 self.armed = True
                 self.get_logger().info('ESC armed: throttle enabled')
@@ -310,6 +315,19 @@ class GpioDriver(Node):
         self.cmd_steer = clamp(float(msg.data[0]), -1.0, 1.0)
         self.cmd_throttle = clamp(float(msg.data[1]), -1.0, 1.0)
         self.last_cmd_time = self.get_clock().now()
+
+    def _on_mode(self, msg):
+        connected = msg.data != 'NO_CONTROLLER'
+        if connected and not self.controller:
+            self.controller = True
+            self.armed = False
+            self.arm_until = self._now_s() + self.arm_time
+            self.get_logger().info(f'controller connected: arming ESC for {self.arm_time:.1f}s')
+        elif not connected and self.controller:
+            self.controller = False
+            self.armed = False
+            self.arm_until = float('inf')
+            self.get_logger().warn('controller lost: motor neutral, waiting for a controller')
 
     def _tick(self):
         now = self._now_s()
