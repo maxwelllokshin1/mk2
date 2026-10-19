@@ -27,6 +27,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
 from geometry_msgs.msg import PointStamped
+from sensor_msgs.msg import CompressedImage
 from ament_index_python.packages import get_package_share_directory
 
 from pi_drive.person_detect import PersonDetector, center_norm, pick_one
@@ -51,6 +52,8 @@ class PersonDetectorNode(Node):
         d('select', 'largest')           # largest | confident
         d('detect_hz', 2.0)
         d('cv_threads', 2)
+        d('preview_hz', 4.0)             # JPEG preview for the dashboard Camera tab (0 = off)
+        d('preview_quality', 55)
         d('debug_image_path', '')        # e.g. /tmp/person.jpg: last frame with the box, once a second
 
         p = lambda n: self.get_parameter(n).value
@@ -68,6 +71,9 @@ class PersonDetectorNode(Node):
         self.select = p('select')
         self.debug_path = p('debug_image_path')
         self.last_debug = 0.0
+        self.preview_quality = int(p('preview_quality'))
+        self.last_box = None             # (x1, y1, x2, y2, conf) of the last detection, drawn on the preview
+        self.last_box_t = 0.0
         src = str(p('source'))
         self.source = int(src) if src.isdigit() else src
         self.still = None
@@ -79,8 +85,11 @@ class PersonDetectorNode(Node):
 
         self.person_pub = self.create_publisher(PointStamped, '/person', 10)
         self.detected_pub = self.create_publisher(Bool, '/person_detected', 10)
+        self.preview_pub = self.create_publisher(CompressedImage, '/camera/image/jpeg', 1)
         threading.Thread(target=self._capture_loop, daemon=True).start()
         self.create_timer(1.0 / float(p('detect_hz')), self._detect)
+        if float(p('preview_hz')) > 0:
+            self.create_timer(1.0 / float(p('preview_hz')), self._preview)
 
     # ---- capture thread: always keeps only the newest frame (no lag from a buffer) ----
     def _open(self):
@@ -146,6 +155,8 @@ class PersonDetectorNode(Node):
         dets = self.detector.detect(frame)
         ms = (time.monotonic() - t) * 1000.0
         best = pick_one(dets, self.select)
+        self.last_box = (best.x1, best.y1, best.x2, best.y2, best.conf) if best is not None else None
+        self.last_box_t = time.monotonic()
 
         self.detected_pub.publish(Bool(data=best is not None))
         if best is not None:
@@ -167,6 +178,30 @@ class PersonDetectorNode(Node):
                 cv2.rectangle(vis, (int(best.x1), int(best.y1)), (int(best.x2), int(best.y2)), (0, 255, 0), 2)
                 cv2.circle(vis, (int((best.x1 + best.x2) / 2), int((best.y1 + best.y2) / 2)), 5, (0, 0, 255), -1)
             cv2.imwrite(self.debug_path, vis)
+
+    # ---- dashboard preview: newest frame + the person box, as a small JPEG (only while someone listens) ----
+    def _preview(self):
+        if self.preview_pub.get_subscription_count() == 0:
+            return
+        with self.lock:
+            frame = self.frame
+        if frame is None:
+            return
+        vis = frame.copy()
+        if self.last_box is not None and time.monotonic() - self.last_box_t < 1.5:
+            x1, y1, x2, y2, conf = self.last_box
+            cv2.rectangle(vis, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(vis, f'person {conf:.2f}', (int(x1), max(12, int(y1) - 4)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+        ok, buf = cv2.imencode('.jpg', vis, [cv2.IMWRITE_JPEG_QUALITY, self.preview_quality])
+        if not ok:
+            return
+        msg = CompressedImage()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'camera'
+        msg.format = 'jpeg'
+        msg.data = buf.tobytes()
+        self.preview_pub.publish(msg)
 
     def stop(self):
         self.running = False

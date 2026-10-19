@@ -171,6 +171,11 @@ header{
 
 /* ── tuner tab ── */
 .tuner-wrap{padding:24px 28px;overflow-y:auto;flex:1;}
+.camera-wrap{padding:24px 28px;overflow-y:auto;flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;}
+.camera-wrap[hidden]{display:none;}
+.cam-status{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);}
+.cam-status.live{color:var(--green);} .cam-status.bad{color:var(--amber);}
+#camImg{width:min(100%,960px);min-height:240px;background:#000;border:1px solid var(--line-bright);border-radius:8px;object-fit:contain;}
 .tuner-actions{display:flex;align-items:center;gap:14px;margin-bottom:20px;}
 .restart-btn{
   font-family:'Orbitron',sans-serif;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;
@@ -265,6 +270,7 @@ header{
   <div class="tabbar">
     <button class="tab-btn active" id="tabBtnTelemetry">Telemetry</button>
     <button class="tab-btn" id="tabBtnTuner">Tuner</button>
+    <button class="tab-btn" id="tabBtnCamera">Camera</button>
   </div>
 
   <div class="main" id="tabTelemetry">
@@ -384,6 +390,11 @@ header{
       </div>
     </div>
 
+  </div>
+
+  <div class="camera-wrap" id="tabCamera" hidden>
+    <div class="cam-status" id="camStatus">Waiting for the camera…</div>
+    <img id="camImg" alt="camera view (what person detection sees)">
   </div>
 
   <div class="tuner-wrap" id="tabTuner" hidden>
@@ -610,8 +621,17 @@ function applyControllerStatus(d) {
 }
 
 let lastTelemetryT = null;
+function applyCameraStatus(d) {
+  const age = (d.camera_age === undefined) ? -1 : d.camera_age;
+  const el = document.getElementById('camStatus');
+  if (age < 0) { el.textContent = 'No camera frames yet: is the camera connected? (person_detector must be running)'; el.className = 'cam-status bad'; }
+  else if (age > 3) { el.textContent = 'Camera stalled: last frame ' + age.toFixed(0) + 's ago'; el.className = 'cam-status bad'; }
+  else { el.textContent = 'Live'; el.className = 'cam-status live'; }
+}
+
 function applyUpdate(d) {
   applyControllerStatus(d);
+  applyCameraStatus(d);
   // the Live pill / msg rate only track real car telemetry, not the controller heartbeat
   if (d.t !== lastTelemetryT) {
     lastTelemetryT = d.t;
@@ -716,21 +736,29 @@ const tabBtnTelemetry = document.getElementById('tabBtnTelemetry');
 const tabBtnTuner = document.getElementById('tabBtnTuner');
 const tabTelemetry = document.getElementById('tabTelemetry');
 const tabTuner = document.getElementById('tabTuner');
+const tabBtnCamera = document.getElementById('tabBtnCamera');
+const tabCamera = document.getElementById('tabCamera');
+const camImg = document.getElementById('camImg');
+const BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
 let tunerLoaded = false;
 
 function showTab(name) {
-  const showTuner = name === 'tuner';
-  tabTelemetry.hidden = showTuner;
-  tabTuner.hidden = !showTuner;
-  tabBtnTelemetry.classList.toggle('active', !showTuner);
-  tabBtnTuner.classList.toggle('active', showTuner);
-  if (showTuner && !tunerLoaded) {
+  tabTelemetry.hidden = name !== 'telemetry';
+  tabTuner.hidden = name !== 'tuner';
+  tabCamera.hidden = name !== 'camera';
+  tabBtnTelemetry.classList.toggle('active', name === 'telemetry');
+  tabBtnTuner.classList.toggle('active', name === 'tuner');
+  tabBtnCamera.classList.toggle('active', name === 'camera');
+  if (name === 'tuner' && !tunerLoaded) {
     tunerLoaded = true;
     loadTunerParams();
   }
+  // only stream the camera while its tab is open (saves the Pi's Wi-Fi and CPU)
+  camImg.src = name === 'camera' ? '/camera.mjpg?' + Date.now() : BLANK_GIF;
 }
 tabBtnTelemetry.addEventListener('click', () => showTab('telemetry'));
 tabBtnTuner.addEventListener('click', () => showTab('tuner'));
+tabBtnCamera.addEventListener('click', () => showTab('camera'));
 
 // ── tuner: simple input box per param, applied live on change ──
 async function loadTunerParams() {

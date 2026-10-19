@@ -127,4 +127,6 @@ person_detector:
     select: largest             # largest = closest person | confident
     detect_hz: 2.0              # keep low on a Pi 3
     cv_threads: 2
+    preview_hz: 4.0             # frames/s sent to the dashboard Camera tab (0.0 = off). Only encoded while the dashboard runs
+    preview_quality: 55         # JPEG quality of the preview
     debug_image_path: ''        # e.g. /tmp/person.jpg shows the camera frame with the box

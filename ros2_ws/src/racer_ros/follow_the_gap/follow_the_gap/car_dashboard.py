@@ -12,6 +12,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32, Float32MultiArray, String, Empty as EmptyMsg
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from sensor_msgs.msg import CompressedImage
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 from rcl_interfaces.srv import SetParameters, GetParameters
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -148,7 +149,7 @@ class DashboardState:
             'lap_count': 0.0, 'lap_current': 0.0, 'lap_last': 0.0, 'lap_best': 0.0,
             'lidar_angle_min': 0.0, 'lidar_angle_inc': 0.0, 'pred_steering': 0.0,
             'pred_speed': 0.0, 'wheelbase': 0.25, 'max_lidar_range': 3.0, 'lidar_ranges': [],
-            'drive_mode': 'NO_TELEOP', 'controller': False, 'toggle_progress': 0.0,
+            'drive_mode': 'NO_TELEOP', 'controller': False, 'toggle_progress': 0.0, 'camera_age': -1.0,
         }
 
     def update(self, partial):
@@ -175,6 +176,19 @@ class DashboardState:
 state = DashboardState()
 
 
+class CameraState:
+    """Newest camera JPEG from person_detector, shared with the HTTP threads that stream it."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.jpeg = None
+        self.seq = 0
+        self.t = 0.0
+
+
+camera = CameraState()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # keep terminal quiet, GET /stream logs on every heartbeat otherwise
@@ -186,6 +200,10 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_stream()
         elif self.path == '/params':
             self._serve_params()
+        elif self.path.startswith('/camera.mjpg'):
+            self._serve_camera_stream()
+        elif self.path.startswith('/camera.jpg'):
+            self._serve_camera_still()
         else:
             self.send_response(404)
             self.end_headers()
@@ -271,6 +289,41 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_camera_still(self):
+        with camera.cond:
+            jpeg = camera.jpeg
+        if jpeg is None:
+            self._json_response(503, {'ok': False, 'reason': 'no camera frame yet'})
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'image/jpeg')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Content-Length', str(len(jpeg)))
+        self.end_headers()
+        self.wfile.write(jpeg)
+
+    def _serve_camera_stream(self):
+        """MJPEG: the browser shows it with a plain <img src="/camera.mjpg">."""
+        self.send_response(200)
+        self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = -1
+        try:
+            while True:
+                with camera.cond:
+                    camera.cond.wait_for(lambda: camera.seq != last, timeout=5.0)
+                    jpeg, last = camera.jpeg, camera.seq
+                if jpeg is None:
+                    continue
+                self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n' % len(jpeg))
+                self.wfile.write(jpeg)
+                self.wfile.write(b'\r\n')
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _serve_stream(self):
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
@@ -306,6 +359,7 @@ class CarDashboard(Node):
         # controller / mode from joycon_teleop: NO_CONTROLLER | RC | AUTO | AUTO_WAITING
         self.mode_sub = self.create_subscription(String, '/drive_mode', self.mode_callback, 10)
         self.progress_sub = self.create_subscription(Float32, '/mode_toggle_progress', self.progress_callback, 10)
+        self.camera_sub = self.create_subscription(CompressedImage, '/camera/image/jpeg', self.camera_callback, 1)
         self._mode = 'NO_TELEOP'
         self._mode_time = 0.0
         self.create_timer(0.5, self._mode_heartbeat)
@@ -425,6 +479,13 @@ class CarDashboard(Node):
             self._mode = msg.data
             state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP')})
 
+    def camera_callback(self, msg):
+        with camera.cond:
+            camera.jpeg = bytes(msg.data)
+            camera.seq += 1
+            camera.t = time.time()
+            camera.cond.notify_all()
+
     def progress_callback(self, msg):
         state.update({'toggle_progress': float(msg.data)})
 
@@ -434,7 +495,9 @@ class CarDashboard(Node):
             self._mode = 'NO_TELEOP'
         elif not self._mode_time:
             self._mode = 'NO_TELEOP'
-        state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP')})
+        age = round(time.time() - camera.t, 1) if camera.t else -1.0
+        state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP'),
+                      'camera_age': age})
 
     def lap_callback(self, msg):
         lap_count, lap_current, lap_last, lap_best = msg.data
