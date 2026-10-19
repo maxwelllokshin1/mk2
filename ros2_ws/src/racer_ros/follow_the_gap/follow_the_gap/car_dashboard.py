@@ -1,4 +1,5 @@
-#!/usr/bin/env pythonimport json
+#!/usr/bin/env python3
+import json
 import math
 import os
 import queue
