@@ -12,6 +12,8 @@
 [Unit]
 Description=Pi camera MJPEG stream for the racer
 After=network.target
+# rpicam-vid exits whenever its client disconnects, so it restarts a lot: never give up (the default is 5 restarts in 10 s)
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/bin/rpicam-vid -n -t 0 --codec mjpeg --quality 50 --width 320 --height 240 --framerate 8 --listen -o tcp://127.0.0.1:8888

@@ -12,6 +12,7 @@
 #   scripts/pi/car.sh stop        stop whatever is running
 #   scripts/pi/car.sh logs        watch the background car
 #   scripts/pi/car.sh status      what is running, camera service, memory
+#   scripts/pi/car.sh check       is everything that should start at power-on up and working? (run it ~2 min after boot)
 #   scripts/pi/car.sh oled-test [image]    host OLED test pattern / image (stops the car first)
 #   scripts/pi/car.sh oled-anim [gif]      host OLED animation          (stops the car first)
 #
@@ -87,6 +88,43 @@ pull_latest() {                                    # newest code from git; never
   else echo "git pull did not work (offline, or local edits in the way): continuing with the code already here"; fi
 }
 
+check() {                                          # everything a power-on should have brought up
+  local bad=0
+  chk() { local label=$1; shift
+    if "$@" >/dev/null 2>&1; then printf '  ok    %s\n' "$label"; else printf '  FAIL  %s\n' "$label"; bad=$((bad+1)); fi; }
+  echo "== services on the Pi"
+  chk "racer service enabled (car starts at power-on)"        systemctl is-enabled --quiet racer
+  chk "racer-pull timer enabled (checks git every 2 minutes)" systemctl is-enabled --quiet racer-pull.timer
+  chk "camera-stream running (the camera feed)"               systemctl is-active --quiet camera-stream
+  chk "tailscale running (the address that works anywhere)"   systemctl is-active --quiet tailscaled
+  chk "car container running"                                 bash -c "docker ps --filter ancestor=$IMAGE --format '{{.Names}}' | grep -q ."
+  chk "I2C present (the OLED eyes)"                           test -e /dev/i2c-1
+  chk "LiDAR USB port present"                                test -e /dev/ttyUSB0
+  chk "Pi's own settings file (.env.pi)"                      test -s "$ENVFILE"
+  local t; t=$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2 || true)
+  if [ "${t:-}" = "0x0" ]; then echo "  ok    power supply (no under-voltage seen since boot)"
+  else echo "  FAIL  power supply flags: ${t:-unknown} (0x0 is healthy; anything else means low voltage happened)"; bad=$((bad+1)); fi
+  echo "== what the car itself reports (the dashboard's data)"
+  local line; line=$(curl -sN -m 4 http://localhost:8080/stream 2>/dev/null | grep -m1 '^data:' || true)
+  if [ -z "$line" ]; then echo "  FAIL  dashboard did not answer on port 8080"; bad=$((bad+1))
+  else python3 - "$line" <<'PYEOF' || bad=$((bad+1))
+import json, sys
+d = json.loads(sys.argv[1][5:])
+def row(ok, label): print(('  ok    ' if ok else '  FAIL  ') + label)
+row(d['controller'], 'controller connected' + ('' if d['controller'] else '  (press a button on the Joy-Con)'))
+row(d['lidar_ok'], 'LiDAR sending scans')
+row(0 <= d['camera_age'] <= 3, 'camera sending pictures')
+print('  mode: ' + d['drive_mode'])
+PYEOF
+  fi
+  echo "== code on this Pi"
+  echo "  branch $(git rev-parse --abbrev-ref HEAD), $(git log -1 --format='%h %s')"
+  git status -sb | head -1 | sed 's/^/  /'
+  command -v tailscale >/dev/null && tailscale serve status 2>/dev/null | head -3 | sed 's/^/  /' || true
+  echo
+  if [ "$bad" -eq 0 ]; then echo "all good"; else echo "$bad thing(s) marked FAIL above"; fi
+}
+
 status() {
   echo "== containers";      docker ps --filter "ancestor=$IMAGE" --format '{{.Names}}  {{.Status}}'
   echo "== camera stream";   systemctl is-active camera-stream || true
@@ -107,9 +145,10 @@ case "$cmd" in
   stop)   stop_all; echo "stopped" ;;
   logs)   run docker logs -f --tail 50 racer ;;
   status) status ;;
+  check)  check ;;
   oled-test) stop_all; run "$OLED_PY" scripts/pi/oled_test.py "$@"
              echo "(the car is stopped. Restart it with:  scripts/pi/car.sh car)" ;;
   oled-anim) stop_all; run "$OLED_PY" scripts/pi/oled_animate.py "$@"
              echo "(the car is stopped. Restart it with:  scripts/pi/car.sh car)" ;;
-  *)      sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *)      sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
 esac
