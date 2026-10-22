@@ -3,868 +3,363 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JARVIS // Car Telemetry</title>
+<title>Race Car</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Share+Tech+Mono&display=swap');
-
 :root{
-  --bg:#03060a;
-  --panel:#060c14;
-  --panel-2:#0a1420;
-  --line:#123049;
-  --line-bright:#1c4a68;
-  --cyan:#00e5ff;
-  --cyan-dim:rgba(0,229,255,0.12);
-  --cyan-glow:rgba(0,229,255,0.55);
-  --amber:#ffb020;
-  --red:#ff3b5c;
-  --green:#00e676;
-  --text:#bfe3f5;
-  --text-dim:#4d7290;
-  --text-bright:#eafcff;
+  --bg:#0a0a0a; --card:#141414; --line:#2b2b2b; --line2:#3a3a3a;
+  --text:#f1f1f1; --dim:#8c8c8c; --red:#e5322d; --red-bg:#3a1210;
 }
-
 *{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.4;}
+body{min-height:100vh;}
+h2{font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;}
+h2 small{font-weight:400;letter-spacing:0;text-transform:none;margin-left:8px;color:var(--dim);}
 
-html,body{
-  width:100%;height:100%;
-  background:var(--bg);
-  color:var(--text);
-  font-family:'Share Tech Mono','Segoe UI',monospace;
-  overflow:hidden;
-  background-image:
-    radial-gradient(ellipse 70% 50% at 50% 8%, rgba(0,150,220,0.10) 0%, transparent 65%),
-    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(0,150,220,0.06) 0%, transparent 70%);
-}
+/* ---- top bar ---- */
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 24px;padding:14px 20px;border-bottom:1px solid var(--line);}
+.title{font-size:20px;font-weight:700;letter-spacing:0.02em;}
+.status{display:flex;flex-wrap:wrap;gap:8px;flex:1;}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:999px;padding:5px 12px;font-size:13px;}
+.pill i{width:9px;height:9px;border-radius:50%;background:#fff;display:inline-block;}
+.pill.bad{border-color:var(--red);color:#ffb3b0;}
+.pill.bad i{background:var(--red);}
+.mode{text-align:right;min-width:150px;}
+.mode-text{font-size:15px;font-weight:700;border:1px solid #fff;border-radius:6px;padding:4px 10px;display:inline-block;}
+.mode-text.auto{background:#fff;color:#000;}
+.mode-text.wait{border-color:var(--red);color:#ffb3b0;}
+.hold{height:3px;background:var(--line);border-radius:2px;margin-top:6px;overflow:hidden;visibility:hidden;}
+.hold.on{visibility:visible;}
+.hold div{height:100%;width:0;background:#fff;}
 
-.mono{font-family:'Orbitron',sans-serif;}
+.tabs{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--line);}
+.tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--dim);font:inherit;font-weight:600;padding:12px 14px;cursor:pointer;}
+.tab.active{color:#fff;border-bottom-color:var(--red);}
 
-/* ── decorative hex grid corners ── */
-.hexdeco{position:fixed;pointer-events:none;opacity:0.35;z-index:0;}
-.hexdeco.tl{top:14px;left:16px;}
-.hexdeco.br{bottom:14px;right:16px;transform:rotate(180deg);}
+.lost{background:var(--red);color:#fff;text-align:center;padding:8px;font-weight:600;}
 
-.hud{position:relative;z-index:1;width:100%;height:100vh;display:flex;flex-direction:column;}
+main{padding:16px 20px 40px;max-width:1300px;margin:0 auto;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;}
 
-/* ── header ── */
-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 28px;border-bottom:1px solid var(--line);
-  background:rgba(3,6,10,0.85);backdrop-filter:blur(6px);
-}
-.brand{display:flex;align-items:center;gap:12px;}
-.brand-mark{
-  width:30px;height:30px;border-radius:50%;
-  border:1px solid var(--cyan);background:var(--cyan-dim);
-  display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 14px var(--cyan-glow);
-}
-.brand-title{font-family:'Orbitron',sans-serif;font-weight:800;font-size:16px;letter-spacing:0.06em;color:var(--text-bright);}
-.brand-sub{font-size:10px;letter-spacing:0.18em;color:var(--text-dim);text-transform:uppercase;margin-top:2px;}
+/* ---- warnings ---- */
+.alert{border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:16px;font-weight:600;color:var(--dim);}
+.alert.ok{color:#fff;}
+.alert.danger{background:var(--red-bg);border-color:var(--red);color:#fff;}
+.alert .line + .line{margin-top:4px;}
+.alert .tag{display:inline-block;background:var(--red);color:#fff;border-radius:4px;padding:1px 8px;margin-right:8px;font-size:13px;letter-spacing:0.04em;}
 
-.status-pill{
-  display:flex;align-items:center;gap:8px;
-  border:1px solid var(--line);border-radius:20px;
-  padding:6px 14px;background:var(--panel-2);
-  font-size:11px;letter-spacing:0.08em;text-transform:uppercase;
-}
-.status-dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim);}
-.status-dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.6s infinite;}
-.status-dot.dead{background:var(--red);box-shadow:0 0 8px var(--red);}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+/* ---- numbers ---- */
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:12px;}
+.big{font-size:56px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums;}
+.big small{font-size:18px;font-weight:500;color:var(--dim);margin-left:6px;}
+.sub{margin-top:8px;font-size:15px;}
+.note{margin-top:6px;font-size:12px;color:var(--dim);}
+.bar{height:8px;background:#222;border-radius:4px;margin-top:12px;overflow:hidden;}
+.bar div{height:100%;width:0;background:#fff;transition:width .15s;}
+.bar.rev div{background:var(--red);}
+.steerbar{position:relative;height:8px;background:#222;border-radius:4px;margin-top:12px;}
+.steerbar .mid{position:absolute;left:50%;top:-4px;width:2px;height:16px;background:var(--dim);}
+.steerbar #steerFill{position:absolute;top:0;height:100%;background:#fff;transition:all .15s;}
+.steerbar #steerFill.max{background:var(--red);}
+.steerlabels{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:6px;}
 
-#ctrlPill .status-dot.warn{background:var(--amber);box-shadow:0 0 8px var(--amber);}
-.mode-chip{font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:0.12em;padding:2px 8px;border-radius:10px;border:1px solid var(--line-bright);color:var(--text-bright);}
-.mode-chip.rc{color:var(--cyan);border-color:var(--cyan);}
-.mode-chip.auto{color:var(--green);border-color:var(--green);}
-.mode-chip.wait{color:var(--amber);border-color:var(--amber);}
-.mode-chip.none{color:var(--red);border-color:var(--red);}
-.hold-bar{width:60px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;visibility:hidden;}
-.hold-bar.on{visibility:visible;}
-.hold-bar > div{height:100%;width:0%;background:var(--amber);}
+/* ---- pictures ---- */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;}
+.frame{position:relative;background:#000;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+.frame.sq{aspect-ratio:1/1;}
+.frame.cam{aspect-ratio:4/3;}
+.frame canvas,.frame img{position:absolute;inset:0;width:100%;height:100%;display:block;}
+.frame img{object-fit:contain;}
+.over{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;color:#ffb3b0;background:#0d0d0d;font-weight:600;}
+.over[hidden]{display:none;}
 
-.clockbox{text-align:right;}
-.clock{font-family:'Orbitron',sans-serif;font-size:22px;font-weight:600;color:var(--text-bright);letter-spacing:0.05em;}
-.dateline{font-size:10px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;margin-top:2px;}
-
-.headerright{display:flex;align-items:center;gap:18px;}
-
-/* ── main layout ── */
-.main{
-  flex:1;display:grid;
-  grid-template-columns: 300px 1fr 300px;
-  gap:20px;padding:26px 28px;
-  align-items:start;
-  overflow:hidden;
-}
-
-.col{display:flex;flex-direction:column;gap:16px;}
-
-.card{
-  background:var(--panel);border:1px solid var(--line);border-radius:10px;
-  padding:14px 16px;position:relative;overflow:hidden;
-}
-.card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--cyan);opacity:0.55;}
-.card.amber::before{background:var(--amber);}
-.card.red::before{background:var(--red);}
-.card-label{font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;}
-.card-value{font-family:'Orbitron',sans-serif;font-size:22px;font-weight:600;color:var(--text-bright);line-height:1;}
-.card-unit{font-size:11px;color:var(--text-dim);margin-left:4px;}
-.card-sub{font-size:10px;color:var(--text-dim);margin-top:6px;}
-
-/* ── center speed gauge ── */
-.center-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;}
-.gauge-wrap{position:relative;width:340px;height:340px;}
-.gauge-wrap svg{width:100%;height:100%;overflow:visible;}
-.gauge-readout{
-  position:absolute;top:62%;left:50%;transform:translate(-50%,-50%);
-  text-align:center;pointer-events:none;
-}
-.gauge-value{font-family:'Orbitron',sans-serif;font-weight:800;font-size:52px;color:var(--text-bright);text-shadow:0 0 18px var(--cyan-glow);line-height:1;}
-.gauge-unit{font-size:12px;letter-spacing:0.15em;color:var(--text-dim);text-transform:uppercase;margin-top:4px;}
-.gauge-actual{font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--amber);margin-top:8px;letter-spacing:0.05em;}
-
-.legend-row{display:flex;gap:18px;font-size:10px;color:var(--text-dim);letter-spacing:0.05em;text-transform:uppercase;}
-.legend-item{display:flex;align-items:center;gap:6px;}
-.legend-swatch{width:14px;height:3px;border-radius:2px;}
-
-/* ── steering wheel ── */
-.wheel-wrap{position:relative;width:200px;height:200px;margin:6px auto 0;}
-.wheel-wrap svg{width:100%;height:100%;overflow:visible;}
-.steer-readout{margin-top:6px;text-align:center;}
-.steer-value{font-family:'Orbitron',sans-serif;font-weight:700;font-size:26px;color:var(--text-bright);}
-.steer-dir{font-size:9px;letter-spacing:0.15em;color:var(--text-dim);text-transform:uppercase;}
-
-/* ── gap bar ── */
-.gapbar-wrap{margin-top:6px;}
-.gapbar-track{
-  position:relative;width:100%;height:34px;
-  background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
-  overflow:hidden;
-}
-.gapbar-fill{
-  position:absolute;top:0;bottom:0;
-  background:linear-gradient(90deg, rgba(0,229,255,0.15), rgba(0,229,255,0.4));
-  border-left:1px solid var(--cyan);border-right:1px solid var(--cyan);
-  transition:left 0.08s linear, width 0.08s linear;
-}
-.gapbar-best{
-  position:absolute;top:-2px;bottom:-2px;width:2px;
-  background:var(--text-bright);box-shadow:0 0 8px var(--text-bright);
-  transition:left 0.08s linear;
-}
-.gapbar-labels{display:flex;justify-content:space-between;margin-top:6px;font-size:9px;color:var(--text-dim);letter-spacing:0.05em;}
-
-/* ── tab bar ── */
-.tabbar{
-  display:flex;gap:6px;padding:10px 28px 0;
-  border-bottom:1px solid var(--line);
-  background:rgba(3,6,10,0.85);
-}
-.tab-btn{
-  font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;
-  color:var(--text-dim);background:transparent;border:none;border-bottom:2px solid transparent;
-  padding:9px 4px 10px;cursor:pointer;margin-right:18px;
-}
-.tab-btn:hover{color:var(--text);}
-.tab-btn.active{color:var(--cyan);border-bottom-color:var(--cyan);}
-
-/* ── tuner tab ── */
-.tuner-wrap{padding:24px 28px;overflow-y:auto;flex:1;}
-.camera-wrap{padding:24px 28px;overflow-y:auto;flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;}
-.camera-wrap[hidden]{display:none;}
-.cam-status{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);}
-.cam-status.live{color:var(--green);} .cam-status.bad{color:var(--amber);}
-#camImg{width:min(100%,960px);min-height:240px;background:#000;border:1px solid var(--line-bright);border-radius:8px;object-fit:contain;}
-.tuner-actions{display:flex;align-items:center;gap:14px;margin-bottom:20px;}
-.restart-btn{
-  font-family:'Orbitron',sans-serif;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;
-  background:rgba(255,45,45,0.12);border:1px solid var(--red);color:#ff6b6b;
-  padding:10px 18px;border-radius:6px;cursor:pointer;transition:all 0.15s;
-}
-.restart-btn:hover{background:rgba(255,45,45,0.22);box-shadow:0 0 12px rgba(255,45,45,0.35);}
-.restart-status{font-size:11px;color:var(--text-dim);}
-.tuner-grid{
-  display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));
-  gap:12px;max-width:1400px;
-}
-.tuner-row{
-  background:var(--panel);border:1px solid var(--line);border-radius:8px;
-  padding:10px 14px;display:flex;flex-direction:column;gap:6px;
-}
-.tuner-row label{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);}
-.tuner-row .tuner-desc{font-size:11px;line-height:1.4;color:var(--text);}
-.tuner-row input{
-  font-family:'Share Tech Mono',monospace;font-size:14px;color:var(--text-bright);
-  background:var(--panel-2);border:1px solid var(--line);border-radius:5px;
-  padding:6px 9px;outline:none;transition:border-color 0.15s, box-shadow 0.15s;
-}
-.tuner-row input:focus{border-color:var(--cyan);}
-.tuner-row input.applied{border-color:var(--green);box-shadow:0 0 6px rgba(0,230,118,0.4);}
-.tuner-row input.failed{border-color:var(--red);box-shadow:0 0 6px rgba(255,59,92,0.4);}
-.tuner-row .tuner-default{font-size:9px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;}
-.tuner-row .tuner-hint{font-size:9px;color:var(--text-dim);min-height:11px;}
-
-/* ── lidar view ── */
-.lidar-wrap{
-  position:relative;width:100%;aspect-ratio:1/1;
-  background:#000;border:1px solid var(--line);border-radius:6px;
-  overflow:hidden;
-}
-.lidar-wrap canvas{width:100%;height:100%;display:block;}
-
-.footer-note{
-  text-align:center;padding:8px;font-size:9px;color:var(--text-dim);
-  letter-spacing:0.14em;text-transform:uppercase;border-top:1px solid var(--line);
-}
+/* ---- tuning ---- */
+.tune-intro{color:var(--dim);margin-bottom:16px;max-width:760px;}
+.tune-group{margin-bottom:24px;}
+.tune-group h3{font-size:16px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--line);}
+.tune-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.row{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;}
+.row label{display:block;font-weight:600;margin-bottom:4px;}
+.row .desc{font-size:12px;color:var(--dim);margin-bottom:8px;min-height:32px;}
+.row input{width:100%;background:#000;color:#fff;border:1px solid var(--line2);border-radius:6px;padding:8px 10px;font:inherit;font-size:16px;}
+.row input:focus{outline:none;border-color:#fff;}
+.row input.applied{border-color:#fff;background:#1c1c1c;}
+.row input.failed{border-color:var(--red);}
+.row .hint{font-size:12px;color:var(--dim);margin-top:6px;min-height:16px;}
+.row .hint.bad{color:#ffb3b0;}
+button.plain{background:none;border:1px solid var(--line2);color:#fff;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer;}
+button.plain:hover{border-color:#fff;}
 </style>
 </head>
 <body>
 
-<svg class="hexdeco tl" width="140" height="120" viewBox="0 0 140 120">
-  <g fill="none" stroke="#00e5ff" stroke-width="1">
-    <polygon points="20,5 35,13 35,29 20,37 5,29 5,13"/>
-    <polygon points="45,5 60,13 60,29 45,37 30,29 30,13"/>
-    <polygon points="32.5,30 47.5,38 47.5,54 32.5,62 17.5,54 17.5,38"/>
-    <polygon points="57.5,30 72.5,38 72.5,54 57.5,62 42.5,54 42.5,38"/>
-  </g>
-</svg>
-<svg class="hexdeco br" width="140" height="120" viewBox="0 0 140 120">
-  <g fill="none" stroke="#00e5ff" stroke-width="1">
-    <polygon points="20,5 35,13 35,29 20,37 5,29 5,13"/>
-    <polygon points="45,5 60,13 60,29 45,37 30,29 30,13"/>
-    <polygon points="32.5,30 47.5,38 47.5,54 32.5,62 17.5,54 17.5,38"/>
-  </g>
-</svg>
+<header>
+  <div class="title">Race Car</div>
+  <div class="status">
+    <span class="pill bad" id="pCtrl"><i></i><span>Controller</span></span>
+    <span class="pill bad" id="pLidar"><i></i><span>LiDAR</span></span>
+    <span class="pill bad" id="pCam"><i></i><span>Camera</span></span>
+  </div>
+  <div class="mode">
+    <span class="mode-text wait" id="modeText">—</span>
+    <div class="hold" id="hold"><div id="holdFill"></div></div>
+  </div>
+</header>
 
-<div class="hud">
+<nav class="tabs">
+  <button class="tab active" id="tabDrive">Drive</button>
+  <button class="tab" id="tabTuning">Tuning</button>
+</nav>
 
-  <header>
-    <div class="brand">
-      <div class="brand-mark">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00e5ff" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-      </div>
-      <div>
-        <div class="brand-title">JARVIS // CAR TELEMETRY</div>
-        <div class="brand-sub">follow_the_gap · reactive node</div>
-      </div>
+<div class="lost" id="lost" hidden>Lost the connection to the car. Trying again…</div>
+
+<main id="pageDrive">
+  <div class="alert" id="alert">Waiting for data…</div>
+
+  <div class="grid3">
+    <div class="card">
+      <h2>Speed</h2>
+      <div class="big"><span id="speedVal">0.0</span><small>m/s</small></div>
+      <div class="bar" id="speedBarBox"><div id="speedBar"></div></div>
+      <div class="sub" id="dirText">Stopped</div>
+      <div class="note">There is no wheel sensor, so this is estimated from the throttle.</div>
     </div>
-    <div class="headerright">
-      <div class="status-pill" id="ctrlPill">
-        <div class="status-dot" id="ctrlDot"></div>
-        <span id="ctrlText">Controller —</span>
-        <span class="mode-chip none" id="modeChip">—</span>
-        <div class="hold-bar" id="holdBar" title="hold the autonomy button to switch mode"><div id="holdFill"></div></div>
-      </div>
-      <div class="status-pill">
-        <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Connecting</span>
-      </div>
-      <div class="clockbox">
-        <div class="clock" id="clock">--:--:--</div>
-        <div class="dateline" id="dateline">-- -- ----</div>
-      </div>
+    <div class="card">
+      <h2>Steering</h2>
+      <div class="big"><span id="steerVal">0</span><small id="steerSide">straight</small></div>
+      <div class="steerbar"><div class="mid"></div><div id="steerFill"></div></div>
+      <div class="steerlabels"><span>left</span><span>right</span></div>
     </div>
-  </header>
-
-  <div class="tabbar">
-    <button class="tab-btn active" id="tabBtnTelemetry">Telemetry</button>
-    <button class="tab-btn" id="tabBtnTuner">Tuner</button>
-    <button class="tab-btn" id="tabBtnCamera">Camera</button>
+    <div class="card">
+      <h2>Mode</h2>
+      <div class="big" id="modeBig">—</div>
+      <div class="sub" id="modeHelp"></div>
+      <div class="note">Hold the autonomy button on the controller for 3 seconds to switch.</div>
+    </div>
   </div>
 
-  <div class="main" id="tabTelemetry">
-
-    <!-- LEFT: steering -->
-    <div class="col">
-      <div class="card">
-        <div class="card-label">Steering Angle</div>
-        <div class="wheel-wrap">
-          <svg viewBox="0 0 200 200">
-            <circle cx="100" cy="100" r="95" fill="none" stroke="#123049" stroke-width="1.5"/>
-            <g id="wheelGroup">
-              <circle id="wheelRim" cx="100" cy="100" r="78" fill="none" stroke="#00e5ff" stroke-width="11" stroke-linecap="round" style="filter:drop-shadow(0 0 6px var(--cyan-glow));"/>
-              <line x1="100" y1="100" x2="100" y2="24" stroke="#00e5ff" stroke-width="9" stroke-linecap="round"/>
-              <line x1="100" y1="100" x2="46" y2="146" stroke="#00e5ff" stroke-width="9" stroke-linecap="round"/>
-              <line x1="100" y1="100" x2="154" y2="146" stroke="#00e5ff" stroke-width="9" stroke-linecap="round"/>
-              <circle cx="100" cy="100" r="17" fill="#0a1420" stroke="#00e5ff" stroke-width="3"/>
-              <circle cx="100" cy="17" r="5" fill="#ff3b5c"/>
-            </g>
-          </svg>
-          <div class="steer-readout">
-            <div class="steer-value" id="steerValue">0.0°</div>
-            <div class="steer-dir" id="steerDir">centered</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Gap Width</div>
-        <div class="card-value" id="gapWidth">0<span class="card-unit">beams</span></div>
-        <div class="card-sub" id="gapRange">start — / end —</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Best Point</div>
-        <div class="card-value" id="bestIdx">—<span class="card-unit">idx</span></div>
-        <div class="card-sub">target beam in gap</div>
-      </div>
+  <div class="grid2">
+    <div class="card">
+      <h2>LiDAR view <small>car in the middle, front is up. Rings are 1 m apart.</small></h2>
+      <div class="frame sq"><canvas id="lidar"></canvas><div class="over" id="lidarOver">LiDAR not connected</div></div>
     </div>
-
-    <!-- CENTER: speed gauge -->
-    <div class="col center-col">
-      <div class="gauge-wrap">
-        <svg viewBox="0 0 340 340">
-          <path id="speedTrack" fill="none" stroke="#123049" stroke-width="4" stroke-linecap="round"/>
-          <g id="speedTicks"></g>
-          <g id="speedLabels"></g>
-          <line id="odomNeedle" x1="170" y1="170" x2="170" y2="52" stroke="#ffb020" stroke-width="3" stroke-linecap="round" style="filter:drop-shadow(0 0 4px rgba(255,176,32,0.6));"/>
-          <line id="speedNeedle" x1="170" y1="170" x2="170" y2="32" stroke="#00e5ff" stroke-width="4" stroke-linecap="round" style="filter:drop-shadow(0 0 6px var(--cyan-glow));"/>
-          <circle cx="170" cy="170" r="12" fill="#0a1420" stroke="#00e5ff" stroke-width="3"/>
-        </svg>
-        <div class="gauge-readout">
-          <div class="gauge-value" id="speedValue">0.0</div>
-          <div class="gauge-unit">m/s commanded</div>
-          <div class="gauge-actual" id="odomValue">actual: 0.0 m/s</div>
-        </div>
-      </div>
-      <div class="legend-row">
-        <div class="legend-item"><div class="legend-swatch" style="background:#00e5ff"></div>Commanded</div>
-        <div class="legend-item"><div class="legend-swatch" style="background:#ffb020"></div>Actual (odom)</div>
-      </div>
-
-      <div class="gapbar-wrap" style="width:100%;max-width:460px;">
-        <div class="card-label" style="margin-bottom:8px;">LiDAR Gap Window</div>
-        <div class="gapbar-track">
-          <div class="gapbar-fill" id="gapFill" style="left:0%;width:0%;"></div>
-          <div class="gapbar-best" id="gapBest" style="left:0%;"></div>
-        </div>
-        <div class="gapbar-labels"><span>0</span><span id="gapMaxLabel">beam range</span></div>
-      </div>
+    <div class="card">
+      <h2>Camera <small id="camNote"></small></h2>
+      <div class="frame cam"><img id="camImg" alt="camera view"><div class="over" id="camOver">Camera not connected</div></div>
     </div>
-
-    <!-- RIGHT: extra stats -->
-    <div class="col">
-      <div class="card">
-        <div class="card-label">Lap</div>
-        <div class="card-value" id="lapCount" style="font-size:30px;">0</div>
-        <div class="card-sub" id="lapCurrent">current 0.0s</div>
-        <div class="card-sub" id="lapTimes">last — · best —</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Speed Delta</div>
-        <div class="card-value" id="speedDelta">0.0<span class="card-unit">m/s</span></div>
-        <div class="card-sub">commanded − actual</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Last Update</div>
-        <div class="card-value" id="lastUpdate" style="font-size:16px;">—</div>
-        <div class="card-sub" id="msgRate">0 msg/s</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Max Steer (display)</div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <input type="range" id="maxSteerSlider" min="10" max="60" step="1" value="30" style="flex:1;accent-color:#00e5ff;">
-          <span class="mono" id="maxSteerVal" style="font-size:12px;color:var(--text);">30°</span>
-        </div>
-        <div class="card-sub">scales the steering dial only</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Max Speed (display)</div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <input type="range" id="maxSpeedSlider" min="1" max="20" step="0.5" value="15" style="flex:1;accent-color:#00e5ff;">
-          <span class="mono" id="maxSpeedVal" style="font-size:12px;color:var(--text);">15.0</span>
-        </div>
-        <div class="card-sub">scales the speed dial only</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Lidar View — Predicted Path</div>
-        <div class="lidar-wrap">
-          <canvas id="lidarCanvas" width="280" height="280"></canvas>
-        </div>
-      </div>
-    </div>
-
   </div>
+</main>
 
-  <div class="camera-wrap" id="tabCamera" hidden>
-    <div class="cam-status" id="camStatus">Waiting for the camera…</div>
-    <img id="camImg" alt="camera view (what person detection sees)">
-  </div>
-
-  <div class="tuner-wrap" id="tabTuner" hidden>
-    <div class="tuner-actions">
-      <button class="restart-btn" id="restartBtn">⟲ Restart at Start Position</button>
-      <span class="restart-status" id="restartStatus"></span>
-    </div>
-    <div class="tuner-grid" id="tunerGrid"></div>
-  </div>
-
-  <div class="footer-note">AI-Racer-2026 · Nicer Green Machines &nbsp;·&nbsp; /car_info_debug live feed</div>
-</div>
+<main id="pageTuning" hidden>
+  <p class="tune-intro">Change a value and press Enter (or click away). It takes effect on the car right away, even while it is driving.
+  Changes are not saved: after a restart the car goes back to the values in the config file, so write down anything you want to keep.</p>
+  <p style="margin-bottom:16px;"><button class="plain" id="reloadTune">Reload current values</button></p>
+  <div id="tuneGroups"></div>
+</main>
 
 <script>
-// ── gauge geometry helpers ──────────────────────────────────
-function polarToCartesian(cx, cy, r, angleDeg) {
-  const a = (angleDeg - 90) * Math.PI / 180.0;
-  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+const $ = (id) => document.getElementById(id);
+const FRONT_CONE = 25;          // degrees either side of straight that count as "ahead"
+const MAX_SPEED_BAR = 2.0;      // m/s shown as a full bar
+const MAX_STEER = 30;           // degrees shown as full lock
+const LIDAR_CM = 400;           // the LiDAR picture shows up to 4 m
+
+let last = null;
+
+// ---------- top bar ----------
+function pill(el, ok, goodText, badText) {
+  el.className = 'pill' + (ok ? '' : ' bad');
+  el.lastElementChild.textContent = ok ? goodText : badText;
 }
-function describeArc(cx, cy, r, startAngle, endAngle) {
-  const clampedEnd = Math.max(startAngle, Math.min(endAngle, startAngle + 359.999));
-  const start = polarToCartesian(cx, cy, r, clampedEnd);
-  const end = polarToCartesian(cx, cy, r, startAngle);
-  const largeArcFlag = clampedEnd - startAngle <= 180 ? "0" : "1";
-  return ["M", start.x, start.y, "A", r, r, 0, largeArcFlag, 1, end.x, end.y].join(" ");
-}
+const MODES = {
+  RC:            { text: 'RC',                     big: 'RC',          help: 'You are driving with the controller.', cls: '' },
+  AUTO:          { text: 'Autonomous',             big: 'Autonomous',  help: 'The car is driving itself.', cls: 'auto' },
+  AUTO_WAITING:  { text: 'Autonomous: no LiDAR',   big: 'Autonomous',  help: 'Waiting for LiDAR data, so the car is not moving.', cls: 'wait' },
+  NO_CONTROLLER: { text: 'No controller',          big: 'Waiting',     help: 'Connect the controller to drive.', cls: 'wait' },
+  NO_TELEOP:     { text: 'Controller software off', big: 'Off',         help: 'The controller program is not running.', cls: 'wait' },
+};
 
-// ── speed dial: 270 deg sweep, gap at bottom. Real analog gauge —
-// needles pivot from the hub and sweep across a fixed tick ring,
-// nothing "fills in" like a progress bar. ──
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const SPD_CX = 170, SPD_CY = 170, SPD_R = 148;
-const SPD_START = -135, SPD_END = 135;
-const SPEED_NEEDLE_LEN = 138, ODOM_NEEDLE_LEN = 108;
+function render(d) {
+  last = d;
+  const camOk = d.camera_age >= 0 && d.camera_age <= 3;
+  pill($('pCtrl'), d.controller, 'Controller connected', d.drive_mode === 'NO_TELEOP' ? 'Controller software off' : 'Controller not connected');
+  pill($('pLidar'), d.lidar_ok, 'LiDAR connected', 'LiDAR not connected');
+  pill($('pCam'), camOk, 'Camera connected', 'Camera not connected');
 
-document.getElementById('speedTrack').setAttribute('d', describeArc(SPD_CX, SPD_CY, SPD_R, SPD_START, SPD_END));
-
-function drawSpeedDial(maxSpeed) {
-  const ticksG = document.getElementById('speedTicks');
-  const labelsG = document.getElementById('speedLabels');
-  ticksG.innerHTML = '';
-  labelsG.innerHTML = '';
-
-  const majorCount = 6;
-  const decimals = maxSpeed <= 5 ? 1 : 0;
-  for (let i = 0; i <= majorCount; i++) {
-    const frac = i / majorCount;
-    const ang = SPD_START + (SPD_END - SPD_START) * frac;
-
-    const p1 = polarToCartesian(SPD_CX, SPD_CY, SPD_R - 8, ang);
-    const p2 = polarToCartesian(SPD_CX, SPD_CY, SPD_R + 8, ang);
-    const line = document.createElementNS(SVG_NS, 'line');
-    line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
-    line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
-    line.setAttribute('stroke', '#6a8cad'); line.setAttribute('stroke-width', '2.5');
-    ticksG.appendChild(line);
-
-    const lp = polarToCartesian(SPD_CX, SPD_CY, SPD_R + 24, ang);
-    const text = document.createElementNS(SVG_NS, 'text');
-    text.setAttribute('x', lp.x); text.setAttribute('y', lp.y);
-    text.setAttribute('fill', '#8fb0cc'); text.setAttribute('font-size', '12');
-    text.setAttribute('font-family', "'Share Tech Mono', monospace");
-    text.setAttribute('text-anchor', 'middle'); text.setAttribute('dominant-baseline', 'middle');
-    text.textContent = (maxSpeed * frac).toFixed(decimals);
-    labelsG.appendChild(text);
-
-    if (i < majorCount) {
-      const midAng = SPD_START + (SPD_END - SPD_START) * ((i + 0.5) / majorCount);
-      const m1 = polarToCartesian(SPD_CX, SPD_CY, SPD_R - 4, midAng);
-      const m2 = polarToCartesian(SPD_CX, SPD_CY, SPD_R + 4, midAng);
-      const mline = document.createElementNS(SVG_NS, 'line');
-      mline.setAttribute('x1', m1.x); mline.setAttribute('y1', m1.y);
-      mline.setAttribute('x2', m2.x); mline.setAttribute('y2', m2.y);
-      mline.setAttribute('stroke', '#2a4060'); mline.setAttribute('stroke-width', '1.5');
-      ticksG.appendChild(mline);
-    }
-  }
-}
-
-function setNeedle(elId, value, maxSpeed, length) {
-  const frac = Math.max(0, Math.min(1, value / maxSpeed));
-  const angle = SPD_START + (SPD_END - SPD_START) * frac;
-  const tip = polarToCartesian(SPD_CX, SPD_CY, length, angle);
-  const el = document.getElementById(elId);
-  el.setAttribute('x2', tip.x);
-  el.setAttribute('y2', tip.y);
-}
-
-function setSpeedGauge(speed, odomSpeed, maxSpeed) {
-  setNeedle('speedNeedle', speed, maxSpeed, SPEED_NEEDLE_LEN);
-  setNeedle('odomNeedle', odomSpeed, maxSpeed, ODOM_NEEDLE_LEN);
-}
-
-// ── steering wheel: rotates in place like a real wheel, amplified
-// so small commanded angles are still visible.
-// AckermannDriveStamped.steering_angle follows REP103 (x-forward,
-// y-left, counterclockwise-positive), so positive = LEFT. A real
-// driver turns the wheel counterclockwise (negative SVG rotate())
-// to go left, so the sign here is inverted from the raw angle. ──
-const STEER_WHEEL_GAIN = 4;
-
-function setSteeringWheel(steerDeg, maxSteer) {
-  const clamped = Math.max(-maxSteer, Math.min(maxSteer, steerDeg));
-  const rot = Math.max(-180, Math.min(180, -clamped * STEER_WHEEL_GAIN));
-  document.getElementById('wheelGroup').setAttribute('transform', `rotate(${rot} 100 100)`);
-  document.getElementById('wheelRim').setAttribute('stroke', Math.abs(clamped) > maxSteer * 0.82 ? '#ff3b5c' : '#00e5ff');
-}
-
-// ── lidar view: top-down, egocentric, forward = up ──
-// Points and the predicted path both live in the car's local frame
-// (REP103: x-forward, y-left) and get mapped to canvas the same way,
-// so they always line up regardless of steering/range values.
-const lidarCanvas = document.getElementById('lidarCanvas');
-const lidarCtx = lidarCanvas.getContext('2d');
-const PRED_TIME_HORIZON = 1.0; // seconds — "where will the car be in ~1s at its current commanded speed"
-const PRED_PATH_MIN = 1.0; // meters — keep the line visible even near-stopped
-
-function localToCanvas(x, y, maxRange, W, H) {
-  const margin = 14;
-  const scale = (Math.min(W, H) / 2 - margin) / maxRange;
-  return {
-    cx: W / 2 - y * scale,
-    cy: H - margin - x * scale,
-  };
-}
-
-function drawLidarView(ranges, angleMin, angleInc, steering, speed, wheelbase, maxRange) {
-  const W = lidarCanvas.width, H = lidarCanvas.height;
-  lidarCtx.fillStyle = '#000';
-  lidarCtx.fillRect(0, 0, W, H);
-  if (!ranges || ranges.length === 0) return;
-
-  // faster commanded speed -> project further ahead. Capped at maxRange
-  // since drawing past the visible radius would just run off-canvas.
-  const predPathLen = Math.min(maxRange, Math.max(PRED_PATH_MIN, Math.abs(speed) * PRED_TIME_HORIZON));
-
-  // lidar points as white pixels
-  lidarCtx.fillStyle = '#fff';
-  for (let i = 0; i < ranges.length; i++) {
-    const r = ranges[i];
-    if (r <= 0 || r > maxRange) continue;
-    const ang = angleMin + i * angleInc;
-    const x = r * Math.cos(ang), y = r * Math.sin(ang); // local frame: x fwd, y left
-    const p = localToCanvas(x, y, maxRange, W, H);
-    if (p.cx < 0 || p.cx >= W || p.cy < 0 || p.cy >= H) continue;
-    lidarCtx.fillRect(p.cx, p.cy, 2, 2);
-  }
-
-  // predicted path — bicycle model, constant steering angle over predPathLen
-  lidarCtx.strokeStyle = '#ff2d2d';
-  lidarCtx.lineWidth = 2;
-  lidarCtx.beginPath();
-  const steps = 24;
-  for (let i = 0; i <= steps; i++) {
-    const s = predPathLen * (i / steps);
-    let x, y;
-    if (Math.abs(steering) < 1e-3 || wheelbase <= 0) {
-      x = s; y = 0;
-    } else {
-      const R = wheelbase / Math.tan(steering);
-      const theta = s / R;
-      x = R * Math.sin(theta);
-      y = R * (1 - Math.cos(theta));
-    }
-    const p = localToCanvas(x, y, maxRange, W, H);
-    if (i === 0) lidarCtx.moveTo(p.cx, p.cy); else lidarCtx.lineTo(p.cx, p.cy);
-  }
-  lidarCtx.stroke();
-
-  // car marker
-  const origin = localToCanvas(0, 0, maxRange, W, H);
-  lidarCtx.fillStyle = '#00e5ff';
-  lidarCtx.beginPath();
-  lidarCtx.arc(origin.cx, origin.cy, 4, 0, Math.PI * 2);
-  lidarCtx.fill();
-}
-
-// ── state ──
-let maxSpeedDisplay = 15;
-let maxSteerDisplay = 30;
-let gapMaxSeen = 900;
-let lastMsgTime = 0;
-let msgCount = 0, msgCountWindowStart = Date.now();
-
-drawSpeedDial(maxSpeedDisplay);
-
-const maxSteerSlider = document.getElementById('maxSteerSlider');
-const maxSpeedSlider = document.getElementById('maxSpeedSlider');
-maxSteerSlider.addEventListener('input', () => {
-  maxSteerDisplay = +maxSteerSlider.value;
-  document.getElementById('maxSteerVal').textContent = maxSteerDisplay + '°';
-});
-maxSpeedSlider.addEventListener('input', () => {
-  maxSpeedDisplay = +maxSpeedSlider.value;
-  document.getElementById('maxSpeedVal').textContent = maxSpeedDisplay.toFixed(1);
-  drawSpeedDial(maxSpeedDisplay);
-});
-
-function fmtLapTime(s) {
-  if (!s || s <= 0) return '—';
-  const m = Math.floor(s / 60);
-  const sec = (s % 60).toFixed(1).padStart(4, '0');
-  return m > 0 ? `${m}:${sec}` : `${sec}s`;
-}
-
-function applyControllerStatus(d) {
-  const mode = d.drive_mode || 'NO_TELEOP';
-  const dot = document.getElementById('ctrlDot');
-  const txt = document.getElementById('ctrlText');
-  const chip = document.getElementById('modeChip');
-  const connected = !!d.controller;
-  dot.className = 'status-dot ' + (connected ? 'live' : (mode === 'NO_TELEOP' ? 'warn' : 'dead'));
-  txt.textContent = connected ? 'Controller connected'
-                  : mode === 'NO_TELEOP' ? 'Teleop not running'
-                  : 'No controller';
-  const label = { RC: 'RC', AUTO: 'AUTONOMOUS', AUTO_WAITING: 'AUTO · WAITING FOR LIDAR',
-                  NO_CONTROLLER: 'WAITING', NO_TELEOP: 'OFFLINE' }[mode] || mode;
-  chip.textContent = label;
-  chip.className = 'mode-chip ' + (mode === 'RC' ? 'rc' : mode === 'AUTO' ? 'auto' : mode === 'AUTO_WAITING' ? 'wait' : 'none');
+  const m = MODES[d.drive_mode] || { text: d.drive_mode, big: d.drive_mode, help: '', cls: 'wait' };
+  $('modeText').textContent = m.text;
+  $('modeText').className = 'mode-text ' + (m.cls || '');
+  $('modeBig').textContent = m.big;
+  $('modeHelp').textContent = m.help;
   const prog = d.toggle_progress || 0;
-  const bar = document.getElementById('holdBar');
-  bar.className = 'hold-bar' + (prog > 0 && prog < 1 ? ' on' : '');
-  document.getElementById('holdFill').style.width = (prog * 100).toFixed(0) + '%';
-}
+  $('hold').className = 'hold' + (prog > 0 && prog < 1 ? ' on' : '');
+  $('holdFill').style.width = (prog * 100).toFixed(0) + '%';
 
-let lastTelemetryT = null;
-function applyCameraStatus(d) {
-  const age = (d.camera_age === undefined) ? -1 : d.camera_age;
-  const el = document.getElementById('camStatus');
-  if (age < 0) { el.textContent = 'No camera frames yet: is the camera connected? (person_detector must be running)'; el.className = 'cam-status bad'; }
-  else if (age > 3) { el.textContent = 'Camera stalled: last frame ' + age.toFixed(0) + 's ago'; el.className = 'cam-status bad'; }
-  else { el.textContent = 'Live'; el.className = 'cam-status live'; }
-}
-
-function applyUpdate(d) {
-  applyControllerStatus(d);
-  applyCameraStatus(d);
-  // the Live pill / msg rate only track real car telemetry, not the controller heartbeat
-  if (d.t !== lastTelemetryT) {
-    lastTelemetryT = d.t;
-    lastMsgTime = Date.now();
-    msgCount++;
-  }
-
-  document.getElementById('lapCount').textContent = (d.lap_count || 0).toFixed(0);
-  document.getElementById('lapCurrent').textContent = 'current ' + fmtLapTime(d.lap_current);
-  document.getElementById('lapTimes').textContent = `last ${fmtLapTime(d.lap_last)} · best ${fmtLapTime(d.lap_best)}`;
-
+  // speed
   const speed = d.speed || 0;
-  const odom = d.odom_speed || 0;
-  const steer = d.steering || 0;
-  const gapStart = d.gap_start || 0;
-  const gapEnd = d.gap_end || 0;
-  const best = d.best || 0;
+  $('speedVal').textContent = Math.abs(speed).toFixed(1);
+  $('speedBar').style.width = Math.min(100, Math.abs(speed) / MAX_SPEED_BAR * 100) + '%';
+  $('speedBarBox').className = 'bar' + (d.reversing ? ' rev' : '');
+  $('dirText').textContent = d.reversing ? 'Reversing' : (speed > 0.05 ? 'Forward' : 'Stopped');
 
-  setSpeedGauge(speed, odom, maxSpeedDisplay);
-  document.getElementById('speedValue').textContent = speed.toFixed(1);
-  document.getElementById('odomValue').textContent = 'actual: ' + odom.toFixed(2) + ' m/s';
-  document.getElementById('speedDelta').textContent = (speed - odom).toFixed(2);
+  // steering (positive = left)
+  const deg = d.steering_deg || 0;
+  $('steerVal').textContent = Math.abs(deg).toFixed(0) + '°';
+  $('steerSide').textContent = Math.abs(deg) < 1 ? 'straight' : (deg > 0 ? 'left' : 'right');
+  const frac = Math.min(1, Math.abs(deg) / MAX_STEER) * 50;
+  const fill = $('steerFill');
+  fill.style.width = frac + '%';
+  fill.style.left = deg > 0 ? (50 - frac) + '%' : '50%';
+  fill.className = frac > 42 ? 'max' : '';
 
-  setSteeringWheel(steer, maxSteerDisplay);
-  document.getElementById('steerValue').textContent = steer.toFixed(1) + '°';
+  // warnings
+  const warnCm = wallDistance(speed);
+  const wall = d.lidar_ok && d.front_cm >= 0 && d.front_cm < warnCm;
+  const al = $('alert');
+  const lines = [];
+  if (wall) lines.push('<div class="line"><span class="tag">WALL</span>Wall ahead, ' + d.front_cm + ' cm away</div>');
+  if (d.reversing) lines.push('<div class="line"><span class="tag">REVERSE</span>Reversing</div>');
+  if (lines.length) { al.className = 'alert danger'; al.innerHTML = lines.join(''); }
+  else if (!d.lidar_ok) { al.className = 'alert'; al.innerHTML = ''; al.textContent = 'No LiDAR data, so wall warnings are off.'; }
+  else { al.className = 'alert ok'; al.innerHTML = ''; al.textContent = d.front_cm >= 0 ? 'Path clear. Nearest thing ahead: ' + d.front_cm + ' cm' : 'Path clear'; }
 
-  const recovering = gapStart < 0 || gapEnd < 0 || best < 0;
-  document.getElementById('steerDir').textContent = recovering
-    ? 'recovering — reversing'
-    : (Math.abs(steer) < 1 ? 'centered' : (steer > 0 ? 'left' : 'right'));
-
-  if (recovering) {
-    document.getElementById('gapWidth').textContent = '—';
-    document.getElementById('gapRange').textContent = 'no gap — car is in recovery';
-    document.getElementById('bestIdx').textContent = '—';
-    document.getElementById('gapFill').style.width = '0%';
-    document.getElementById('gapBest').style.left = '-10%';
-  } else {
-    const gapWidth = Math.max(0, gapEnd - gapStart + 1);
-    document.getElementById('gapWidth').textContent = gapWidth.toFixed(0);
-    document.getElementById('gapRange').textContent = `start ${gapStart.toFixed(0)} / end ${gapEnd.toFixed(0)}`;
-    document.getElementById('bestIdx').textContent = best.toFixed(0);
-
-    gapMaxSeen = Math.max(gapMaxSeen, gapEnd + 20);
-    const fillLeft = (gapStart / gapMaxSeen) * 100;
-    const fillWidth = (gapWidth / gapMaxSeen) * 100;
-    const bestLeft = (best / gapMaxSeen) * 100;
-    document.getElementById('gapFill').style.left = fillLeft + '%';
-    document.getElementById('gapFill').style.width = fillWidth + '%';
-    document.getElementById('gapBest').style.left = bestLeft + '%';
-    document.getElementById('gapMaxLabel').textContent = '0 – ' + gapMaxSeen.toFixed(0) + ' beams';
-  }
-
-  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-
-  if (d.lidar_ranges && d.lidar_ranges.length > 0) {
-    drawLidarView(d.lidar_ranges, d.lidar_angle_min, d.lidar_angle_inc, d.pred_steering, d.pred_speed, d.wheelbase, d.max_lidar_range || 3.0);
-  }
+  // pictures
+  $('lidarOver').hidden = !!d.lidar_ok;
+  $('camOver').hidden = camOk;
+  $('camNote').textContent = d.camera_age > 3 ? 'last picture ' + d.camera_age.toFixed(0) + ' s ago' : '';
+  drawLidar(d, warnCm, wall);
 }
 
-// ── connection status / heartbeat ──
-function setLive(isLive) {
-  const dot = document.getElementById('statusDot');
-  const txt = document.getElementById('statusText');
-  dot.className = 'status-dot ' + (isLive ? 'live' : 'dead');
-  txt.textContent = isLive ? 'Live' : 'No Signal';
-}
-setInterval(() => {
-  setLive(lastMsgTime > 0 && (Date.now() - lastMsgTime) < 1500);
-  const elapsed = (Date.now() - msgCountWindowStart) / 1000;
-  if (elapsed >= 1) {
-    document.getElementById('msgRate').textContent = (msgCount / elapsed).toFixed(1) + ' msg/s';
-    msgCount = 0; msgCountWindowStart = Date.now();
+// the faster the car goes, the earlier the wall warning
+function wallDistance(speed) { return 35 + 60 * Math.max(speed, 0); }
+
+// ---------- LiDAR picture ----------
+function drawLidar(d, warnCm, wall) {
+  const c = $('lidar');
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 8, k = R / LIDAR_CM;
+
+  // rings every metre
+  g.lineWidth = 1; g.strokeStyle = '#262626'; g.fillStyle = '#6a6a6a'; g.font = '11px system-ui';
+  for (let m = 1; m <= LIDAR_CM / 100; m++) {
+    g.beginPath(); g.arc(cx, cy, m * 100 * k, 0, Math.PI * 2); g.stroke();
+    g.fillText(m + ' m', cx + 4, cy - m * 100 * k + 12);
   }
-}, 300);
+  g.beginPath(); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.stroke();
 
-// ── clock ──
-function tickClock() {
-  const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleTimeString([], {hour12:false});
-  document.getElementById('dateline').textContent = now.toLocaleDateString([], {weekday:'short', month:'short', day:'2-digit', year:'numeric'});
+  // "ahead" zone: red when something is inside it
+  const a = FRONT_CONE * Math.PI / 180, zr = Math.min(warnCm, LIDAR_CM) * k;
+  g.beginPath(); g.moveTo(cx, cy);
+  g.arc(cx, cy, zr, -Math.PI / 2 - a, -Math.PI / 2 + a); g.closePath();
+  g.fillStyle = wall ? 'rgba(229,50,45,0.28)' : 'rgba(255,255,255,0.05)'; g.fill();
+  g.strokeStyle = wall ? '#e5322d' : '#4a4a4a'; g.stroke();
+
+  // readings: one per degree, 0 = straight ahead, counting to the left
+  const scan = d.scan || [];
+  for (let deg = 0; deg < scan.length; deg++) {
+    const r = scan[deg];
+    if (!r || r > LIDAR_CM) continue;
+    const t = deg * Math.PI / 180;
+    const x = cx - r * k * Math.sin(t), y = cy - r * k * Math.cos(t);
+    const ahead = (deg <= FRONT_CONE || deg >= 360 - FRONT_CONE) && r < warnCm;
+    g.fillStyle = ahead ? '#e5322d' : '#ffffff';
+    g.fillRect(x - 1.5, y - 1.5, 3, 3);
+  }
+
+  // the car
+  g.fillStyle = '#fff';
+  g.beginPath(); g.moveTo(cx, cy - 9); g.lineTo(cx - 6, cy + 7); g.lineTo(cx + 6, cy + 7); g.closePath(); g.fill();
 }
-tickClock();
-setInterval(tickClock, 1000);
+window.addEventListener('resize', () => { if (last) render(last); });
 
-// ── SSE connection to the ROS bridge ──
+// ---------- live data from the car ----------
 function connect() {
   const es = new EventSource('/stream');
-  es.onmessage = (ev) => {
-    try { applyUpdate(JSON.parse(ev.data)); } catch (e) { /* ignore malformed frame */ }
-  };
-  es.onerror = () => {
-    setLive(false);
-    es.close();
-    setTimeout(connect, 1000);
-  };
+  es.onopen = () => { $('lost').hidden = true; };
+  es.onmessage = (ev) => { $('lost').hidden = true; try { render(JSON.parse(ev.data)); } catch (e) { console.error(e); } };
+  es.onerror = () => { $('lost').hidden = false; es.close(); setTimeout(connect, 1500); };
 }
 connect();
 
-// ── tabs ──
-const tabBtnTelemetry = document.getElementById('tabBtnTelemetry');
-const tabBtnTuner = document.getElementById('tabBtnTuner');
-const tabTelemetry = document.getElementById('tabTelemetry');
-const tabTuner = document.getElementById('tabTuner');
-const tabBtnCamera = document.getElementById('tabBtnCamera');
-const tabCamera = document.getElementById('tabCamera');
-const camImg = document.getElementById('camImg');
-const BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
-let tunerLoaded = false;
-
+// ---------- tabs ----------
+const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
 function showTab(name) {
-  tabTelemetry.hidden = name !== 'telemetry';
-  tabTuner.hidden = name !== 'tuner';
-  tabCamera.hidden = name !== 'camera';
-  tabBtnTelemetry.classList.toggle('active', name === 'telemetry');
-  tabBtnTuner.classList.toggle('active', name === 'tuner');
-  tabBtnCamera.classList.toggle('active', name === 'camera');
-  if (name === 'tuner' && !tunerLoaded) {
-    tunerLoaded = true;
-    loadTunerParams();
-  }
-  // only stream the camera while its tab is open (saves the Pi's Wi-Fi and CPU)
-  camImg.src = name === 'camera' ? '/camera.mjpg?' + Date.now() : BLANK_GIF;
+  const tuning = name === 'tuning';
+  $('pageDrive').hidden = tuning;
+  $('pageTuning').hidden = !tuning;
+  $('tabDrive').classList.toggle('active', !tuning);
+  $('tabTuning').classList.toggle('active', tuning);
+  history.replaceState(null, '', tuning ? '#tuning' : '#drive');
+  if (tuning && !tuningLoaded) loadTuning();
+  updateCamera();
 }
-tabBtnTelemetry.addEventListener('click', () => showTab('telemetry'));
-tabBtnTuner.addEventListener('click', () => showTab('tuner'));
-tabBtnCamera.addEventListener('click', () => showTab('camera'));
+// the camera only streams while the Drive tab is on screen
+function updateCamera() {
+  const want = !$('pageDrive').hidden && !document.hidden;
+  const img = $('camImg');
+  if (want && !img.dataset.on) { img.dataset.on = '1'; img.src = '/camera.mjpg?' + Date.now(); }
+  if (!want && img.dataset.on) { delete img.dataset.on; img.src = BLANK; }
+}
+document.addEventListener('visibilitychange', updateCamera);
+$('tabDrive').addEventListener('click', () => showTab('drive'));
+$('tabTuning').addEventListener('click', () => showTab('tuning'));
 
-// ── tuner: simple input box per param, applied live on change ──
-async function loadTunerParams() {
-  const grid = document.getElementById('tunerGrid');
-  grid.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">Loading current values from reactive_node…</div>';
+// ---------- tuning ----------
+let tuningLoaded = false;
+async function loadTuning() {
+  tuningLoaded = true;
+  const box = $('tuneGroups');
+  box.innerHTML = '<p class="tune-intro">Loading the current values from the car…</p>';
   let params;
-  try {
-    const res = await fetch('/params');
-    params = await res.json();
-  } catch (e) {
-    grid.innerHTML = '<div style="color:var(--red);font-size:12px;">Could not reach the dashboard server.</div>';
-    return;
-  }
+  try { params = await (await fetch('/params')).json(); }
+  catch (e) { box.innerHTML = '<p class="tune-intro" style="color:#ffb3b0">Could not reach the car.</p>'; tuningLoaded = false; return; }
 
-  grid.innerHTML = '';
-  for (const [name, meta] of Object.entries(params)) {
-    const row = document.createElement('div');
-    row.className = 'tuner-row';
-
-    const label = document.createElement('label');
-    label.textContent = meta.label || name;
-    row.appendChild(label);
-
-    if (meta.desc) {
-      const desc = document.createElement('div');
-      desc.className = 'tuner-desc';
-      desc.textContent = meta.desc;
-      row.appendChild(desc);
-    }
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = meta.type === 'int' ? '1' : 'any';
-    // pre-filled with the live value read from reactive_node (falls back
-    // to the known default server-side if that read failed) — never blank
-    input.value = (meta.value === null || meta.value === undefined) ? (meta.default ?? '') : meta.value;
-    input.dataset.name = name;
-    input.dataset.type = meta.type;
-    row.appendChild(input);
-
-    if (meta.default !== null && meta.default !== undefined) {
-      const def = document.createElement('div');
-      def.className = 'tuner-default';
-      def.textContent = 'start value: ' + meta.default;
-      row.appendChild(def);
-    }
-
-    const hint = document.createElement('div');
-    hint.className = 'tuner-hint';
-    row.appendChild(hint);
-
-    input.addEventListener('change', () => applyTunerParam(input, hint));
-    grid.appendChild(row);
+  const groups = {};
+  for (const [name, p] of Object.entries(params)) (groups[p.group] = groups[p.group] || []).push([name, p]);
+  box.innerHTML = '';
+  for (const [title, items] of Object.entries(groups)) {
+    const sec = document.createElement('div'); sec.className = 'tune-group';
+    const head = document.createElement('h3'); head.textContent = title; sec.appendChild(head);
+    const list = document.createElement('div'); list.className = 'tune-list'; sec.appendChild(list);
+    for (const [name, p] of items) list.appendChild(tuneRow(name, p));
+    box.appendChild(sec);
   }
 }
-
-async function applyTunerParam(input, hint) {
-  const name = input.dataset.name;
-  const type = input.dataset.type;
+function tuneRow(name, p) {
+  const row = document.createElement('div'); row.className = 'row';
+  const label = document.createElement('label'); label.textContent = p.label; row.appendChild(label);
+  const desc = document.createElement('div'); desc.className = 'desc'; desc.textContent = p.desc || ''; row.appendChild(desc);
+  const input = document.createElement('input');
+  input.type = 'number'; input.step = p.type === 'int' ? '1' : 'any'; input.value = p.value;
+  row.appendChild(input);
+  const hint = document.createElement('div'); hint.className = 'hint';
+  hint.textContent = p.live ? 'Config file value: ' + p.default : 'The ' + p.node.replace('_', ' ') + ' program did not answer, showing the config file value';
+  if (!p.live) hint.classList.add('bad');
+  row.appendChild(hint);
+  input.addEventListener('change', () => applyParam(name, p, input, hint));
+  return row;
+}
+async function applyParam(name, p, input, hint) {
   const raw = input.value.trim();
   if (raw === '') return;
-  const value = type === 'int' ? parseInt(raw, 10) : parseFloat(raw);
-  if (Number.isNaN(value)) {
-    hint.textContent = 'not a number';
-    input.classList.add('failed');
-    return;
-  }
-
-  input.classList.remove('applied', 'failed');
-  hint.textContent = 'applying…';
+  const value = p.type === 'int' ? parseInt(raw, 10) : parseFloat(raw);
+  if (Number.isNaN(value)) { input.classList.add('failed'); hint.textContent = 'Not a number'; hint.className = 'hint bad'; return; }
+  input.classList.remove('applied', 'failed'); hint.className = 'hint'; hint.textContent = 'Applying…';
   try {
-    const res = await fetch('/set_param', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, value }),
-    });
-    const result = await res.json();
-    if (result.ok) {
-      input.classList.add('applied');
-      hint.textContent = 'live';
-      setTimeout(() => input.classList.remove('applied'), 1200);
-    } else {
-      input.classList.add('failed');
-      hint.textContent = result.reason || 'rejected';
-    }
-  } catch (e) {
-    input.classList.add('failed');
-    hint.textContent = 'request failed';
-  }
+    const res = await fetch('/set_param', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, value }) });
+    const out = await res.json();
+    if (out.ok) { input.classList.add('applied'); hint.textContent = 'Applied now'; setTimeout(() => input.classList.remove('applied'), 1200); }
+    else { input.classList.add('failed'); hint.className = 'hint bad'; hint.textContent = out.reason || 'Not accepted'; }
+  } catch (e) { input.classList.add('failed'); hint.className = 'hint bad'; hint.textContent = 'Could not reach the car'; }
 }
+$('reloadTune').addEventListener('click', loadTuning);
 
-// ── restart button ──
-document.getElementById('restartBtn').addEventListener('click', async () => {
-  const status = document.getElementById('restartStatus');
-  status.textContent = 'restarting…';
-  try {
-    const res = await fetch('/restart', { method: 'POST' });
-    const result = await res.json();
-    status.textContent = result.ok ? (result.reason || 'restarted') : ('failed: ' + (result.reason || 'unknown error'));
-    status.style.color = result.ok ? 'var(--green)' : 'var(--red)';
-  } catch (e) {
-    status.textContent = 'request failed';
-    status.style.color = 'var(--red)';
-  }
-  setTimeout(() => { status.textContent = ''; }, 4000);
-});
+showTab(location.hash === '#tuning' ? 'tuning' : 'drive');
 </script>
 </body>
 </html>

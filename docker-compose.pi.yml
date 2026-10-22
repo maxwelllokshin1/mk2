@@ -48,6 +48,14 @@ services:
       - /sys:/sys
       # edit pins / tuning / eye images / the YOLO model on the Pi without rebuilding the image:
       - ./ros2_ws/src/racer_ros/pi_drive/config:/ws/install/pi_drive/share/pi_drive/config:ro
+      # the car's own code and the dashboard page run straight from this repo, so 'git pull' + a restart
+      # (scripts/pi/car.sh update) is enough, with no image rebuild. Only a change to Dockerfile.pi, package.xml
+      # or setup.py (new packages, new commands) needs the image rebuilt.
+      - ./ros2_ws/src/racer_ros/pi_drive/pi_drive:/ws/install/pi_drive/lib/python3.10/site-packages/pi_drive:ro
+      - ./ros2_ws/src/racer_ros/pi_drive/launch:/ws/install/pi_drive/share/pi_drive/launch:ro
+      - ./ros2_ws/src/racer_ros/follow_the_gap/follow_the_gap:/ws/install/follow_the_gap/lib/python3.10/site-packages/follow_the_gap:ro
+      - ./ros2_ws/src/racer_ros/follow_the_gap/dashboard:/ws/install/follow_the_gap/share/follow_the_gap/dashboard:ro
+      - ./ros2_ws/src/racer_ros/follow_the_gap/config:/ws/install/follow_the_gap/share/follow_the_gap/config:ro
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }

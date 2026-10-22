@@ -1,0 +1,16 @@
+# Checks git for new commits every 2 minutes while the Pi is on and has internet.
+#
+# Install on the Pi:
+#   sudo cp scripts/pi/racer-pull.service scripts/pi/racer-pull.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now racer-pull.timer
+#   systemctl list-timers racer-pull          # when it last / next runs
+#   journalctl -u racer-pull -n 20 --no-pager # what it pulled
+[Unit]
+Description=Check git for new racer code every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

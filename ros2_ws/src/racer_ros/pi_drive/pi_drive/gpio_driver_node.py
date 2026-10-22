@@ -7,6 +7,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import SetParametersResult
 from std_msgs.msg import Float32MultiArray, String
 
 # Pi 5 hardware PWM (dtoverlay=pwm-2chan): which pwmchip channel drives which BCM pin
@@ -177,6 +178,8 @@ class GpioDriver(Node):
         else:
             self.get_logger().warn('throttle_gpio is -1: throttle off, motor will not move')
 
+        self.add_on_set_parameters_callback(self._on_params)   # lets the dashboard Tuning tab change these live
+
         # ---- ROS io ----
         self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
         self.create_subscription(String, '/drive_mode', self._on_mode, 10)
@@ -315,6 +318,30 @@ class GpioDriver(Node):
         self.cmd_steer = clamp(float(msg.data[0]), -1.0, 1.0)
         self.cmd_throttle = clamp(float(msg.data[1]), -1.0, 1.0)
         self.last_cmd_time = self.get_clock().now()
+
+    # parameter -> (attribute it sets, lowest, highest). The dashboard may change these while the car runs.
+    LIVE = {'throttle_slew_per_s': ('slew', 0.02, 5.0), 'steer_center_us': ('steer_center', 1000.0, 2000.0),
+            'steer_range_us': ('steer_range', 0.0, 500.0), 'recenter_overshoot_left_us': ('overshoot_left', 0.0, 200.0),
+            'recenter_overshoot_right_us': ('overshoot_right', 0.0, 200.0), 'recenter_overshoot_s': ('overshoot_s', 0.0, 1.0)}
+
+    def _on_params(self, params):
+        for p in params:
+            if p.name not in self.LIVE:
+                continue
+            _, lo, hi = self.LIVE[p.name]
+            try:
+                v = float(p.value)
+            except (TypeError, ValueError):
+                return SetParametersResult(successful=False, reason=f'{p.name} must be a number')
+            if not lo <= v <= hi:
+                return SetParametersResult(successful=False, reason=f'{p.name} must be between {lo:g} and {hi:g}')
+        for p in params:
+            if p.name in self.LIVE:
+                setattr(self, self.LIVE[p.name][0], float(p.value))
+                self.get_logger().info(f'{p.name} changed to {float(p.value):g}')
+                if p.name.startswith('steer_'):
+                    self.last_us = None          # send the steering pulse again with the new numbers
+        return SetParametersResult(successful=True)
 
     def _on_mode(self, msg):
         connected = msg.data != 'NO_CONTROLLER'

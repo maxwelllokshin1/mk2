@@ -28,6 +28,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32, Float32MultiArray, String
 from ackermann_msgs.msg import AckermannDriveStamped
+from rcl_interfaces.msg import SetParametersResult
 
 try:
     import evdev
@@ -154,6 +155,7 @@ class JoyconTeleop(Node):
         self.steer_side = self.get_parameter('steer_side').value
         self.button_side = self.get_parameter('button_side').value
 
+        self.add_on_set_parameters_callback(self._on_params)   # lets the dashboard Tuning tab change these live
         self.devices = {}      # 'left' / 'right' -> InputDevice
         self.axis_norm = {}    # side -> (mid, half) for the steering axis
         self._ignored = set()  # paths that are not Joy-Cons
@@ -303,6 +305,27 @@ class JoyconTeleop(Node):
                     self.auto_toggled = False
                     self.progress_pub.publish(Float32(data=0.0))
                 self.btn_auto_down = down
+
+    # parameters the dashboard may change while the car runs, with their allowed range
+    LIVE_RANGES = {'rc_forward': (0.0, 1.0), 'rc_reverse': (0.0, 1.0), 'auto_max_throttle': (0.0, 1.0),
+                   'steer_deadzone': (0.0, 0.9), 'throttle_deadzone': (0.0, 0.9)}
+
+    def _on_params(self, params):
+        for p in params:
+            if p.name not in self.LIVE_RANGES:
+                continue
+            lo, hi = self.LIVE_RANGES[p.name]
+            try:
+                v = float(p.value)
+            except (TypeError, ValueError):
+                return SetParametersResult(successful=False, reason=f'{p.name} must be a number')
+            if not lo <= v <= hi:
+                return SetParametersResult(successful=False, reason=f'{p.name} must be between {lo} and {hi}')
+        for p in params:
+            if p.name in self.LIVE_RANGES:
+                setattr(self.mixer.cfg, p.name, float(p.value))
+                self.get_logger().info(f'{p.name} changed to {float(p.value):g}')
+        return SetParametersResult(successful=True)
 
     def _now_s(self):
         return self.get_clock().now().nanoseconds / 1e9

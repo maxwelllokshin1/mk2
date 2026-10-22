@@ -1,0 +1,14 @@
+# Pulls new commits from git into this repo. It only updates the files; the running car keeps the code it
+# started with until the next restart (power cycle, or scripts/pi/car.sh update).
+# Installed together with racer-pull.timer (see that file). Edit User= and the paths if yours differ.
+[Unit]
+Description=Pull the latest racer code from git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=maxwelllokshin
+WorkingDirectory=/home/maxwelllokshin/mk2
+ExecStart=/usr/bin/git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 pull --ff-only
+TimeoutStartSec=90

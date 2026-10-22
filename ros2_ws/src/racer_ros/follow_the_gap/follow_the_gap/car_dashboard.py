@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""
+Car dashboard: a small web page (port 8080) that shows what the car is doing, in RC and autonomous mode alike.
+
+Shows   controller / LiDAR / camera connected, mode, speed, steering angle, wall-ahead and reversing warnings,
+        the LiDAR picture, the camera picture, and a Tuning tab that changes parameters while the car runs.
+Reads   /drive_mode (joycon_teleop), /drive_cmd (what the car is told to do), /ego_racecar/odom (speed estimate),
+        /scan (LiDAR), /camera/image/jpeg (person_detector), /mode_toggle_progress
+Tunes   reactive_node, joycon_teleop and gpio_driver through their normal ROS parameter services.
+"""
 import json
 import math
 import os
@@ -10,9 +19,10 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32, Float32MultiArray, String, Empty as EmptyMsg
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from sensor_msgs.msg import CompressedImage
+from rclpy.qos import qos_profile_sensor_data
+from std_msgs.msg import Float32, Float32MultiArray, String
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import CompressedImage, LaserScan
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 from rcl_interfaces.srv import SetParameters, GetParameters
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,100 +33,126 @@ except ImportError:
     get_package_share_directory = None
 
 PORT = 8080
+FRONT_CONE_DEG = 25          # "ahead" for the wall warning = this many degrees either side of straight
 
-# Single source of truth for the Tuner tab — GET /params reads current
-# values from reactive_node itself (not from this dict), so this only
-# needs to say each param's ROS type and a human label. Keep names in
-# sync with reactive_node.py's declare_parameter() calls / gap_params.yaml.
+# Tuning tab. `node` says which ROS node owns the parameter; the current value is always read from that node.
+# GET /params reads the live values, POST /set_param changes one. Keep names in sync with the nodes.
 TUNABLE_PARAMS = {
+    # ---- driving (joycon_teleop / gpio_driver) ----
+    'rc_forward': {
+        'node': 'joycon_teleop', 'group': 'Driving', 'type': 'double', 'label': 'Forward throttle at full stick (0 to 1)', 'default': 0.30,
+        'desc': 'How much throttle you get with the stick fully forward in RC mode. Raise slowly.',
+    },
+    'rc_reverse': {
+        'node': 'joycon_teleop', 'group': 'Driving', 'type': 'double', 'label': 'Reverse throttle at full stick (0 to 1)', 'default': 0.25,
+        'desc': 'Same, for reverse.',
+    },
+    'throttle_slew_per_s': {
+        'node': 'gpio_driver', 'group': 'Driving', 'type': 'double', 'label': 'Throttle ramp-up speed', 'default': 0.3,
+        'desc': 'How fast the throttle may build up. 0.3 means about 1 second to reach 0.3 throttle. Lower = gentler start. Letting go always stops at once.',
+    },
+    'auto_max_throttle': {
+        'node': 'joycon_teleop', 'group': 'Driving', 'type': 'double', 'label': 'Autonomous top throttle (0 to 1)', 'default': 0.25,
+        'desc': 'The most throttle autonomous mode can use. Raise step by step as the car proves itself.',
+    },
+    'steer_deadzone': {
+        'node': 'joycon_teleop', 'group': 'Driving', 'type': 'double', 'label': 'Steering stick dead zone', 'default': 0.12,
+        'desc': 'How far you must move the stick before the wheels turn. Raise it if the wheels twitch with the stick centered.',
+    },
+    'throttle_deadzone': {
+        'node': 'joycon_teleop', 'group': 'Driving', 'type': 'double', 'label': 'Throttle stick dead zone', 'default': 0.15,
+        'desc': 'How far you must push the stick before the motor gets any throttle.',
+    },
+    # ---- steering linkage (gpio_driver) ----
+    'steer_center_us': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Steering center (µs)', 'default': 1500.0,
+        'desc': 'Servo pulse for straight wheels. Nudge it up or down until the car rolls straight.',
+    },
+    'steer_range_us': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Steering range (µs)', 'default': 200.0,
+        'desc': 'How far from center the servo goes at full lock. Limited by the end stops set in the config file.',
+    },
+    'recenter_overshoot_left_us': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Recenter kick after a left turn (µs)', 'default': 40.0,
+        'desc': 'When the wheels come back from a left turn they swing this far past center first, so the slack in the linkage is taken up. 0 = off.',
+    },
+    'recenter_overshoot_right_us': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Recenter kick after a right turn (µs)', 'default': 80.0,
+        'desc': 'Same, after a right turn. Raise it if the wheels stay a little right after turning right.',
+    },
+    'recenter_overshoot_s': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Recenter kick hold time (s)', 'default': 0.15,
+        'desc': 'How long the wheels stay at the kick position before settling on center.',
+    },
+    # ---- autonomous driving (reactive_node) ----
     'bubble_radius': {
-        'type': 'double', 'label': 'Bubble Radius (m)', 'default': 0.3,
-        'desc': "Safety zone around the closest obstacle the lidar sees — the car won't aim through it. Higher = wider berth, more cautious. Lower = cuts closer, tighter lines.",
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Bubble radius (m)', 'default': 0.3,
+        'desc': "Safety zone around the closest obstacle. The car won't aim through it. Higher = wider berth. Lower = cuts closer.",
     },
     'preprocess_conv_size': {
-        'type': 'int', 'label': 'Preprocess Conv Size', 'default': 3,
-        'desc': 'How many lidar readings get averaged together to smooth out sensor noise. Higher = smoother but blurs out small gaps.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'int', 'label': 'Smoothing window (readings)', 'default': 3,
+        'desc': 'How many LiDAR readings get averaged together to smooth out noise. Higher = smoother but blurs small gaps.',
     },
     'max_lidar_range': {
-        'type': 'double', 'label': 'Max Lidar Range (m)', 'default': 3.5,
-        'desc': 'How far the car "pretends" it can see — readings beyond this get capped. Higher = reacts sooner. Lower = only reacts to close stuff, more panicky.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'How far it looks (m)', 'default': 3.5,
+        'desc': 'Readings beyond this are capped. Higher = reacts sooner. Lower = only reacts to close things.',
     },
     'speed_max': {
-        'type': 'double', 'label': 'Max Speed (m/s)', 'default': 15.0,
-        'desc': "Hard ceiling on speed — not a cruising speed, just the max it's ever allowed to hit.",
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Top speed it may ask for (m/s)', 'default': 15.0,
+        'desc': 'The ceiling for the speed autonomous mode asks for. Actual speed is also limited by the autonomous top throttle above.',
     },
     'steering_gain': {
-        'type': 'double', 'label': 'Steering Gain', 'default': 0.38,
-        'desc': 'How hard the car turns toward its target point. Higher = sharper/snappier (can overshoot). Lower = lazier, might not turn enough.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Steering strength', 'default': 0.38,
+        'desc': 'How hard it turns toward its target. Higher = sharper (can overshoot). Lower = lazier.',
     },
     'max_steering': {
-        'type': 'double', 'label': 'Max Steering (deg)', 'default': 30.0,
-        'desc': 'The steepest angle the car is ever allowed to steer, in either direction.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Max steering angle (deg)', 'default': 30.0,
+        'desc': 'The steepest angle it may steer, either direction.',
     },
     'alpha_straight': {
-        'type': 'double', 'label': 'Alpha — Straight', 'default': 0.6,
-        'desc': 'Steering smoothing used when aiming nearly straight. Higher (toward 1) = very stable, ignores tiny wiggles. Lower = twitchier even on straights.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Smoothing on straights (0 to 1)', 'default': 0.6,
+        'desc': 'Steering smoothing when nearly straight. Higher = steadier, ignores tiny wiggles. Lower = twitchier.',
     },
     'alpha_curve': {
-        'type': 'double', 'label': 'Alpha — Curve', 'default': 0.6,
-        'desc': 'Steering smoothing used when aiming sharply (a real curve). Higher = smoother but laggier reaction to the turn. Lower (toward 0) = reacts almost instantly, but jitterier.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Smoothing in curves (0 to 1)', 'default': 0.6,
+        'desc': 'Steering smoothing when turning sharply. Higher = smoother but slower to react. Lower = reacts fast, jumpier.',
     },
     'fov_deg': {
-        'type': 'double', 'label': 'Field of View (deg/side)', 'default': 70.0,
-        'desc': "How far to EACH side the car looks. Higher = can see further around bends (may start turning early). Lower = can't see around bends as early, less premature turning.",
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'View width (deg each side)', 'default': 70.0,
+        'desc': 'How far to each side it looks. Higher = sees further around bends but may turn early.',
     },
     'gap_aim_aggressiveness': {
-        'type': 'double', 'label': 'Gap Aim Aggressiveness', 'default': 0.5,
-        'desc': 'How much the car aims at the farthest visible point vs. the immediate gap center. 0 = always centered/cautious. 1 = aim far — can cut corners early.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Aim far or near (0 to 1)', 'default': 0.5,
+        'desc': '0 = aim at the middle of the nearest gap (careful). 1 = aim at the farthest point (cuts corners).',
     },
     'straight_min_forward_frac': {
-        'type': 'double', 'label': 'Straight Min Forward Frac', 'default': 0.75,
-        'desc': '% of Max Lidar Range that must be clear straight ahead to call this a straightaway and speed up. Higher = stricter, needs a wide-open track.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Clear distance to call it a straight', 'default': 0.75,
+        'desc': 'Share of the look-ahead distance that must be clear to count as a straightaway and speed up.',
     },
     'straight_max_angle_deg': {
-        'type': 'double', 'label': 'Straight Max Angle (deg)', 'default': 6.0,
-        'desc': "Steering has to stay under this angle to count as \"driving straight.\" Higher = more forgiving of wobble, speeds up more easily.",
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Steering allowed on a straight (deg)', 'default': 6.0,
+        'desc': 'Steering must stay under this angle to count as driving straight.',
     },
     'straight_ema_alpha': {
-        'type': 'double', 'label': 'Straight EMA Alpha', 'default': 0.2,
-        'desc': 'How fast the straight-vs-curve detector updates its mind. Higher = notices changes faster. Lower = slower/steadier assessment.',
-    },
-    'lap_leave_dist': {
-        'type': 'double', 'label': 'Lap Leave Dist (m)', 'default': 3.0,
-        'desc': "How far the car must get from the start point before a lap can even start counting — stops it counting a lap the instant it moves an inch.",
-    },
-    'lap_return_dist': {
-        'type': 'double', 'label': 'Lap Return Dist (m)', 'default': 1.5,
-        'desc': 'How close the car has to get back to the start point to count as "lap complete." Higher = looser finish line.',
-    },
-    'lap_min_time': {
-        'type': 'double', 'label': 'Lap Min Time (s)', 'default': 5.0,
-        'desc': 'Minimum seconds between lap counts, purely to stop double-counting the same crossing from position jitter.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'How fast it notices a straight', 'default': 0.2,
+        'desc': 'Higher = notices changes sooner. Lower = slower, steadier.',
     },
     'recovery_straight_time': {
-        'type': 'double', 'label': 'Recovery Straight Time (s)', 'default': 0.8,
-        'desc': 'When stuck, how long the car reverses in a straight line before it starts steering away from the wall.',
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Reverse straight for (s)', 'default': 0.8,
+        'desc': 'When stuck, how long it backs up in a straight line before steering away from the wall.',
     },
     'recovery_clear_dist': {
-        'type': 'double', 'label': 'Recovery Clear Dist (m)', 'default': 1.0,
-        'desc': "Space needed on BOTH sides before the car decides it's free and resumes driving. Higher = more patient/cautious before continuing.",
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Space needed to go again (m)', 'default': 1.0,
+        'desc': 'Free space needed on both sides before it resumes driving after backing up.',
     },
     'recovery_max_time': {
-        'type': 'double', 'label': 'Recovery Max Time (s)', 'default': 6.0,
-        'desc': 'Safety cutoff — after this many seconds of reversing, the car gives up looking for "fully clear" and just resumes anyway, so it can never back up forever.',
-    },
-    'wheelbase': {
-        'type': 'double', 'label': 'Wheelbase (m)', 'default': 0.25,
-        'desc': "The car's real front-to-rear axle distance. A hardware spec, not really a tuning knob — only used to draw the dashboard's predicted-path curve.",
-    },
-    'lidar_view_every_n': {
-        'type': 'int', 'label': 'Lidar View Every N Scans', 'default': 10,
-        'desc': "How often the dashboard's lidar-view picture refreshes. Doesn't affect driving at all — display only.",
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Longest it will back up (s)', 'default': 6.0,
+        'desc': 'After this long reversing it gives up and drives on, so it can never back up forever.',
     },
 }
+PARAM_NODES = sorted({m['node'] for m in TUNABLE_PARAMS.values()})
 
-# Set once CarDashboard() is constructed in main() — Handler is instantiated
-# per-request by ThreadingHTTPServer with no other way to reach the node.
+# Set once CarDashboard() is constructed in main(): Handler is created per request with no other way to reach it.
 dashboard_node = None
 
 
@@ -138,23 +174,19 @@ HTML_PATH = find_dashboard_html()
 
 
 class DashboardState:
-    """Shared between the ROS callback thread and HTTP server threads."""
+    """Shared between the ROS thread and the HTTP server threads."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.clients = []
         self.latest = {
-            'speed': 0.0, 'odom_speed': 0.0, 'steering': 0.0,
-            'gap_start': 0.0, 'gap_end': 0.0, 'best': 0.0, 't': 0.0,
-            'lap_count': 0.0, 'lap_current': 0.0, 'lap_last': 0.0, 'lap_best': 0.0,
-            'lidar_angle_min': 0.0, 'lidar_angle_inc': 0.0, 'pred_steering': 0.0,
-            'pred_speed': 0.0, 'wheelbase': 0.25, 'max_lidar_range': 3.0, 'lidar_ranges': [],
-            'drive_mode': 'NO_TELEOP', 'controller': False, 'toggle_progress': 0.0, 'camera_age': -1.0,
+            'controller': False, 'drive_mode': 'NO_TELEOP', 'toggle_progress': 0.0,
+            'lidar_ok': False, 'scan': [], 'front_cm': -1,
+            'speed': 0.0, 'steering_deg': 0.0, 'throttle': 0.0, 'reversing': False,
+            'camera_age': -1.0, 't': 0.0,
         }
 
     def update(self, partial):
-        # merge rather than replace — /car_info_debug and /lap_info are
-        # two separate topics/callbacks, each only knows its own fields
         with self.lock:
             self.latest = {**self.latest, **partial}
             snapshot = dict(self.latest)
@@ -191,7 +223,7 @@ camera = CameraState()
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        pass  # keep terminal quiet, GET /stream logs on every heartbeat otherwise
+        pass  # keep the terminal quiet
 
     def do_GET(self):
         if self.path in ('/', '/index.html'):
@@ -211,8 +243,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/set_param':
             self._handle_set_param()
-        elif self.path == '/restart':
-            self._handle_restart()
         else:
             self.send_response(404)
             self.end_headers()
@@ -222,7 +252,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
-        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(body)
 
@@ -232,20 +261,15 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw or b'{}')
 
     def _serve_params(self):
-        names = list(TUNABLE_PARAMS.keys())
-        values = dashboard_node.get_reactive_params(names) if dashboard_node else None
+        live = dashboard_node.get_all_params() if dashboard_node else {}
         out = {}
         for name, meta in TUNABLE_PARAMS.items():
-            live_value = (values or {}).get(name)
+            value = live.get(name)
             out[name] = {
-                'label': meta['label'],
-                'desc': meta.get('desc', ''),
-                'type': meta['type'],
-                'default': meta.get('default'),
-                # fall back to the known default if reactive_node isn't
-                # reachable yet, so the box still starts with something
-                # sensible instead of empty
-                'value': live_value if live_value is not None else meta.get('default'),
+                'label': meta['label'], 'desc': meta.get('desc', ''), 'type': meta['type'],
+                'group': meta['group'], 'node': meta['node'], 'default': meta.get('default'),
+                'value': value if value is not None else meta.get('default'),
+                'live': value is not None,   # False = that node did not answer, so the box shows the start value
             }
         self._json_response(200, out)
 
@@ -259,19 +283,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         meta = TUNABLE_PARAMS.get(name)
         if meta is None:
-            self._json_response(400, {'ok': False, 'reason': f'unknown param: {name}'})
+            self._json_response(400, {'ok': False, 'reason': f'unknown parameter: {name}'})
             return
         if dashboard_node is None:
-            self._json_response(503, {'ok': False, 'reason': 'dashboard node not ready'})
+            self._json_response(503, {'ok': False, 'reason': 'dashboard not ready'})
             return
-        ok, reason = dashboard_node.set_reactive_param(name, value, meta['type'])
-        self._json_response(200 if ok else 500, {'ok': ok, 'reason': reason})
-
-    def _handle_restart(self):
-        if dashboard_node is None:
-            self._json_response(503, {'ok': False, 'reason': 'dashboard node not ready'})
-            return
-        ok, reason = dashboard_node.do_restart()
+        ok, reason = dashboard_node.set_param(meta['node'], name, value, meta['type'])
         self._json_response(200 if ok else 500, {'ok': ok, 'reason': reason})
 
     def _serve_html(self):
@@ -285,6 +302,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -329,7 +347,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
-        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
 
         q = state.register()
@@ -353,40 +370,104 @@ class Handler(BaseHTTPRequestHandler):
 class CarDashboard(Node):
     def __init__(self):
         super().__init__('car_dashboard')
-        self.sub = self.create_subscription(Float32MultiArray, '/car_info_debug', self.debug_callback, 10)
-        self.lap_sub = self.create_subscription(Float32MultiArray, '/lap_info', self.lap_callback, 10)
-        self.lidar_view_sub = self.create_subscription(Float32MultiArray, '/lidar_view', self.lidar_view_callback, 10)
-        # controller / mode from joycon_teleop: NO_CONTROLLER | RC | AUTO | AUTO_WAITING
-        self.mode_sub = self.create_subscription(String, '/drive_mode', self.mode_callback, 10)
-        self.progress_sub = self.create_subscription(Float32, '/mode_toggle_progress', self.progress_callback, 10)
-        self.camera_sub = self.create_subscription(CompressedImage, '/camera/image/jpeg', self.camera_callback, 1)
-        self._mode = 'NO_TELEOP'
-        self._mode_time = 0.0
-        self.create_timer(0.5, self._mode_heartbeat)
+        self.declare_parameter('max_steer_deg', 30.0)        # steering angle shown at full stick
+        self.declare_parameter('lidar_front_offset_deg', 0.0)  # turn the LiDAR picture if it is mounted rotated
+        self.max_steer_deg = float(self.get_parameter('max_steer_deg').value)
+        self.front_offset = math.radians(float(self.get_parameter('lidar_front_offset_deg').value))
 
-        # live parameter tuning — talks to reactive_node's own standard
-        # ROS2 parameter services, no custom IPC needed
-        self.get_params_client = self.create_client(GetParameters, '/reactive_node/get_parameters')
-        self.set_params_client = self.create_client(SetParameters, '/reactive_node/set_parameters')
-        self.bridge_get_params_client = self.create_client(GetParameters, '/bridge/get_parameters')
+        self.create_subscription(String, '/drive_mode', self._on_mode, 10)
+        self.create_subscription(Float32, '/mode_toggle_progress', self._on_progress, 10)
+        self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
+        self.create_subscription(Odometry, '/ego_racecar/odom', self._on_odom, 10)
+        self.create_subscription(LaserScan, '/scan', self._on_scan, qos_profile_sensor_data)
+        self.create_subscription(CompressedImage, '/camera/image/jpeg', self._on_camera, 1)
 
-        # restart button — reposition via /initialpose (gym_bridge listens
-        # for this, it's the same topic RViz's "2D Pose Estimate" uses),
-        # then tell reactive_node to clear its own stuck/lap/recovery state
-        self.initialpose_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
-        self.reactive_reset_pub = self.create_publisher(EmptyMsg, '/reactive_reset', 10)
+        self._mode, self._mode_t = 'NO_TELEOP', 0.0
+        self._progress = 0.0
+        self._steer, self._throttle, self._cmd_t = 0.0, 0.0, 0.0
+        self._speed, self._odom_t = 0.0, 0.0
+        self._scan_t, self._scan_proc_t = 0.0, 0.0
+        self._bins, self._front_cm = [], -1
 
-        self.get_logger().info('DASHBOARD INITIALIZED...')
+        self.create_timer(0.1, self._push)   # one snapshot to the browsers, 10 times a second
 
+        # live tuning: each node's own standard parameter services
+        self._param_clients = {
+            n: (self.create_client(GetParameters, f'/{n}/get_parameters'),
+                self.create_client(SetParameters, f'/{n}/set_parameters'))
+            for n in PARAM_NODES
+        }
+        self.get_logger().info('dashboard ready')
+
+    # ---------------- ROS callbacks: only remember the latest value ----------------
+    def _on_mode(self, msg):
+        self._mode, self._mode_t = msg.data, time.time()
+
+    def _on_progress(self, msg):
+        self._progress = float(msg.data)
+
+    def _on_cmd(self, msg):
+        if len(msg.data) >= 2:
+            self._steer, self._throttle, self._cmd_t = float(msg.data[0]), float(msg.data[1]), time.time()
+
+    def _on_odom(self, msg):
+        self._speed, self._odom_t = float(msg.twist.twist.linear.x), time.time()
+
+    def _on_camera(self, msg):
+        with camera.cond:
+            camera.jpeg = bytes(msg.data)
+            camera.seq += 1
+            camera.t = time.time()
+            camera.cond.notify_all()
+
+    def _on_scan(self, msg):
+        now = time.time()
+        self._scan_t = now
+        if now - self._scan_proc_t < 0.2:   # the picture only needs ~5 updates a second
+            return
+        self._scan_proc_t = now
+        bins = [0] * 360                    # one cm value per degree; 0 = no reading. Degree 0 = straight ahead, counting to the left
+        start = msg.angle_min + self.front_offset
+        rmin = max(float(msg.range_min), 0.05)
+        for i, r in enumerate(msg.ranges):
+            if not math.isfinite(r) or r < rmin or r > 60.0:
+                continue
+            deg = int(round(math.degrees(start + i * msg.angle_increment))) % 360
+            cm = max(1, int(r * 100))
+            if bins[deg] == 0 or cm < bins[deg]:
+                bins[deg] = cm
+        self._bins = bins
+        ahead = [bins[d] for d in list(range(0, FRONT_CONE_DEG + 1)) + list(range(360 - FRONT_CONE_DEG, 360)) if bins[d] > 0]
+        self._front_cm = min(ahead) if ahead else -1
+
+    # ---------------- one snapshot for the browsers ----------------
+    def _push(self):
+        now = time.time()
+        mode = self._mode if now - self._mode_t < 2.0 else 'NO_TELEOP'
+        cmd_fresh = now - self._cmd_t < 1.0
+        throttle = self._throttle if cmd_fresh else 0.0
+        steering = self._steer if cmd_fresh else 0.0
+        speed = self._speed if now - self._odom_t < 1.0 else 0.0
+        lidar_ok = now - self._scan_t < 2.0
+        cam_age = round(now - camera.t, 1) if camera.t else -1.0
+        state.update({
+            'controller': mode not in ('NO_CONTROLLER', 'NO_TELEOP'),
+            'drive_mode': mode,
+            'toggle_progress': self._progress,
+            'lidar_ok': lidar_ok,
+            'scan': self._bins if lidar_ok else [],
+            'front_cm': self._front_cm if lidar_ok else -1,
+            'speed': round(speed, 2),
+            'steering_deg': round(steering * self.max_steer_deg, 1),   # + = left
+            'throttle': round(throttle, 2),
+            'reversing': speed < -0.05 or throttle < -0.01,
+            'camera_age': cam_age,
+            't': now,
+        })
+
+    # ---------------- live tuning ----------------
     def _call_service_sync(self, client, request, timeout=2.0):
-        """Bridge a ROS2 service call to a blocking HTTP handler thread.
-
-        call_async() is safe to invoke from any thread — it just hands the
-        request to the middleware and returns a Future. The response is
-        delivered on whichever thread is spinning this node (main thread,
-        via rclpy.spin()), which fires add_done_callback() and sets the
-        Event this thread is waiting on.
-        """
+        """Bridge a ROS service call to a blocking HTTP handler thread."""
         if not client.wait_for_service(timeout_sec=timeout):
             return None
         future = client.call_async(request)
@@ -402,23 +483,24 @@ class CarDashboard(Node):
             return None
         return holder.get('result')
 
-    def get_reactive_params(self, names):
-        req = GetParameters.Request()
-        req.names = names
-        resp = self._call_service_sync(self.get_params_client, req)
-        if resp is None:
-            return None
+    def get_all_params(self):
+        """{name: current value} for every tunable parameter whose node answers."""
         out = {}
-        for name, pv in zip(names, resp.values):
-            if pv.type == ParameterType.PARAMETER_DOUBLE:
-                out[name] = pv.double_value
-            elif pv.type == ParameterType.PARAMETER_INTEGER:
-                out[name] = pv.integer_value
-            elif pv.type == ParameterType.PARAMETER_BOOL:
-                out[name] = pv.bool_value
+        for node in PARAM_NODES:
+            names = [n for n, m in TUNABLE_PARAMS.items() if m['node'] == node]
+            req = GetParameters.Request()
+            req.names = names
+            resp = self._call_service_sync(self._param_clients[node][0], req, timeout=1.0)
+            if resp is None:
+                continue
+            for name, pv in zip(names, resp.values):
+                if pv.type == ParameterType.PARAMETER_DOUBLE:
+                    out[name] = pv.double_value
+                elif pv.type == ParameterType.PARAMETER_INTEGER:
+                    out[name] = pv.integer_value
         return out
 
-    def set_reactive_param(self, name, value, ptype):
+    def set_param(self, node, name, value, ptype):
         p = Parameter()
         p.name = name
         pv = ParameterValue()
@@ -429,99 +511,15 @@ class CarDashboard(Node):
             pv.type = ParameterType.PARAMETER_DOUBLE
             pv.double_value = float(value)
         p.value = pv
-
         req = SetParameters.Request()
         req.parameters = [p]
-        resp = self._call_service_sync(self.set_params_client, req)
+        resp = self._call_service_sync(self._param_clients[node][1], req)
         if resp is None:
-            return False, 'reactive_node did not respond (is it running?)'
+            return False, f'{node} did not answer (is it running?)'
         if not resp.results:
             return False, 'no result returned'
         result = resp.results[0]
         return result.successful, result.reason
-
-    def do_restart(self):
-        req = GetParameters.Request()
-        req.names = ['sx', 'sy', 'stheta']
-        resp = self._call_service_sync(self.bridge_get_params_client, req)
-        if resp is None:
-            return False, 'could not read start pose from the gym bridge (/bridge node)'
-        sx, sy, stheta = (v.double_value for v in resp.values)
-
-        pose_msg = PoseWithCovarianceStamped()
-        pose_msg.header.frame_id = 'map'
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.pose.pose.position.x = sx
-        pose_msg.pose.pose.position.y = sy
-        pose_msg.pose.pose.orientation.z = math.sin(stheta / 2.0)
-        pose_msg.pose.pose.orientation.w = math.cos(stheta / 2.0)
-        self.initialpose_pub.publish(pose_msg)
-
-        self.reactive_reset_pub.publish(EmptyMsg())
-        return True, f'restarted at ({sx:.2f}, {sy:.2f})'
-
-    def debug_callback(self, msg):
-        speed, odom_speed, steering, gap_start, gap_end, best = msg.data
-        state.update({
-            'speed': speed,
-            'odom_speed': odom_speed,
-            'steering': steering,
-            'gap_start': gap_start,
-            'gap_end': gap_end,
-            'best': best,
-            't': time.time(),
-        })
-
-    def mode_callback(self, msg):
-        # teleop publishes at ~30 Hz; only touch the shared state when the mode changes (heartbeat re-sends it)
-        self._mode_time = time.time()
-        if msg.data != self._mode:
-            self._mode = msg.data
-            state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP')})
-
-    def camera_callback(self, msg):
-        with camera.cond:
-            camera.jpeg = bytes(msg.data)
-            camera.seq += 1
-            camera.t = time.time()
-            camera.cond.notify_all()
-
-    def progress_callback(self, msg):
-        state.update({'toggle_progress': float(msg.data)})
-
-    def _mode_heartbeat(self):
-        # no /drive_mode for a while = teleop node is not running at all
-        if self._mode_time and time.time() - self._mode_time > 2.0:
-            self._mode = 'NO_TELEOP'
-        elif not self._mode_time:
-            self._mode = 'NO_TELEOP'
-        age = round(time.time() - camera.t, 1) if camera.t else -1.0
-        state.update({'drive_mode': self._mode, 'controller': self._mode not in ('NO_CONTROLLER', 'NO_TELEOP'),
-                      'camera_age': age})
-
-    def lap_callback(self, msg):
-        lap_count, lap_current, lap_last, lap_best = msg.data
-        state.update({
-            'lap_count': lap_count,
-            'lap_current': lap_current,
-            'lap_last': lap_last,
-            'lap_best': lap_best,
-        })
-
-    def lidar_view_callback(self, msg):
-        # [angle_min, angle_increment, steering, speed, wheelbase, max_lidar_range, *ranges]
-        header = msg.data[:6]
-        ranges = list(msg.data[6:])
-        angle_min, angle_inc, steering, speed, wheelbase, max_range = header
-        state.update({
-            'lidar_angle_min': angle_min,
-            'lidar_angle_inc': angle_inc,
-            'pred_steering': steering,
-            'pred_speed': speed,
-            'wheelbase': wheelbase,
-            'max_lidar_range': max_range,
-            'lidar_ranges': ranges,
-        })
 
 
 def start_http_server():
@@ -532,26 +530,15 @@ def start_http_server():
 
 
 def open_dashboard(url):
-    """
-    Launch a browser pointed at url without blocking. The stdlib webbrowser
-    module falls back to GenericBrowser for unregistered command names like
-    'epiphany-browser', which calls Popen(...).wait() and blocks until the
-    browser window is closed — which would stall this whole script (the ROS
-    node never gets constructed) until the user closes it. Spawn detached
-    via Popen directly instead.
-    """
+    """Open a browser on url without blocking (only useful where a screen is attached)."""
     os.environ.setdefault('DISPLAY', ':99')
     for browser in ('epiphany-browser', 'epiphany', 'chromium', 'firefox', 'xdg-open'):
         path = shutil.which(browser)
         if not path:
             continue
         try:
-            subprocess.Popen(
-                [path, url],
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            subprocess.Popen([path, url], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except OSError:
             continue
@@ -564,16 +551,10 @@ def main(args=None):
 
     start_http_server()
     url = f'http://localhost:{PORT}'
-
     print('\n' + '=' * 60)
-    print('  CAR DASHBOARD LIVE')
-    print(f'  {url}')
-    print('  (network_mode: host — also reachable from the Windows')
-    print('   host browser at the same URL)')
+    print('  CAR DASHBOARD')
+    print(f'  {url}   (from another computer: http://<car address>:{PORT})')
     print('=' * 60 + '\n')
-
-    if not open_dashboard(url):
-        print('No in-container browser found — open the URL above manually.\n')
 
     node = CarDashboard()
     dashboard_node = node

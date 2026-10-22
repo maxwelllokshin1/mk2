@@ -6,7 +6,9 @@
 #   scripts/pi/car.sh servo       Joy-Con + servo only (no OLED / camera), in this terminal
 #   scripts/pi/car.sh auto        autonomy test: LiDAR + autonomy + dashboard, no OLED / camera, in this terminal
 #   scripts/pi/car.sh car         EVERYTHING, in the background (restarts on boot)
-#   scripts/pi/car.sh boot        what the racer.service runs at power-on: wait for I2C / LiDAR, then 'car'
+#   scripts/pi/car.sh boot        what the racer.service runs at power-on: pull the latest code, wait for I2C / LiDAR, then 'car'
+#   scripts/pi/car.sh update      pull the latest code from git and restart the car with it
+#   scripts/pi/car.sh restart     restart the car (picks up code and config you changed)
 #   scripts/pi/car.sh stop        stop whatever is running
 #   scripts/pi/car.sh logs        watch the background car
 #   scripts/pi/car.sh status      what is running, camera service, memory
@@ -17,12 +19,19 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."          # repo root, so it works from any folder
 
+# This Pi's own settings (group ids, board revision) live in .env.pi, which git never touches.
+# .env is the Mac's file and is tracked, so it must not hold anything the Pi needs.
+ENVFILE=.env.pi
+if [ ! -f "$ENVFILE" ] && grep -q '^I2C_GID=' .env 2>/dev/null; then       # one-time move from the old place
+  grep -E '^(GPIO|DIALOUT|INPUT|I2C)_GID=|^RPI_LGPIO_REVISION=' .env > "$ENVFILE" || true
+fi
+
 if [ "${1:-}" = boot ]; then          # right after power-on the I2C / USB devices may not exist yet
   for _ in $(seq 30); do [ -e /dev/i2c-1 ] && break; sleep 1; done
   for _ in $(seq 10); do [ -e /dev/ttyUSB0 ] && break; sleep 1; done
 fi
 
-COMPOSE=(docker compose -f docker-compose.pi.yml)
+COMPOSE=(docker compose --env-file "$ENVFILE" -f docker-compose.pi.yml)
 [ -e /dev/ttyUSB0 ] && COMPOSE+=(-f docker-compose.lidar.yml)   # RPLIDAR plugged in
 LAUNCH=(ros2 launch pi_drive pi_drive.launch.py)
 IMAGE=airacer:pi
@@ -45,7 +54,7 @@ preflight() {
   command -v docker >/dev/null || die "docker not found"
   docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE not on this Pi. Send it from your Mac (see scripts/pi/README.md)"
   [ -e /dev/i2c-1 ] || die "/dev/i2c-1 missing: enable I2C (sudo raspi-config nonint do_i2c 0) and reboot"
-  grep -q '^I2C_GID=' .env 2>/dev/null || die "group ids not in .env yet: run  scripts/pi/car.sh setup"
+  grep -q '^I2C_GID=' "$ENVFILE" 2>/dev/null || die "group ids not in $ENVFILE yet: run  scripts/pi/car.sh setup"
 }
 
 launch_fg() {                                      # foreground launch with extra launch args
@@ -59,16 +68,23 @@ setup() {
   run sudo cp scripts/pi/camera-stream.service /etc/systemd/system/
   run sudo systemctl daemon-reload
   run sudo systemctl enable --now camera-stream
-  echo "== group ids -> .env"
-  if dry; then echo "+ (would append GPIO_GID / DIALOUT_GID / INPUT_GID / I2C_GID to .env)"
-  elif grep -q '^I2C_GID=' .env 2>/dev/null; then echo "already in .env"
+  echo "== group ids and board revision -> $ENVFILE"
+  if dry; then echo "+ (would write GPIO_GID / DIALOUT_GID / INPUT_GID / I2C_GID / RPI_LGPIO_REVISION to $ENVFILE)"
   else
-    for g in gpio:GPIO dialout:DIALOUT input:INPUT i2c:I2C; do
+    [ -f "$ENVFILE" ] && [ -n "$(tail -c1 "$ENVFILE")" ] && echo >> "$ENVFILE"
+    grep -q '^I2C_GID=' "$ENVFILE" 2>/dev/null || for g in gpio:GPIO dialout:DIALOUT input:INPUT i2c:I2C; do
       echo "${g##*:}_GID=$(getent group "${g%%:*}" | cut -d: -f3)"
-    done >> .env
+    done >> "$ENVFILE"
+    grep -q '^RPI_LGPIO_REVISION=' "$ENVFILE" || echo "RPI_LGPIO_REVISION=$(awk '/Revision/{print $3}' /proc/cpuinfo)" >> "$ENVFILE"
+    echo "-- $ENVFILE:"; cat "$ENVFILE"
   fi
-  dry || { echo "-- .env ends with:"; tail -4 .env; }
   echo "done. Next:  scripts/pi/car.sh eyes"
+}
+
+pull_latest() {                                    # newest code from git; never blocks the car if there is no network
+  echo "== git pull ($(git rev-parse --abbrev-ref HEAD))"
+  if timeout 45 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 pull --ff-only; then :
+  else echo "git pull did not work (offline, or local edits in the way): continuing with the code already here"; fi
 }
 
 status() {
@@ -84,7 +100,9 @@ case "$cmd" in
   eyes)   launch_fg lidar:=false autonomy:=false dashboard:=false ;;
   servo)  launch_fg lidar:=false autonomy:=false dashboard:=false person:=false oled:=false ;;
   auto)   launch_fg oled:=false person:=false ;;
-  car|boot) stop_all; preflight; run "${COMPOSE[@]}" up -d
+  boot)   pull_latest; exec "$0" car ;;            # exec: the pull may have changed this very script
+  update) pull_latest; exec "$0" car ;;
+  car|restart) stop_all; preflight; run "${COMPOSE[@]}" up -d
           echo "car is running in the background.  scripts/pi/car.sh logs | status | stop" ;;
   stop)   stop_all; echo "stopped" ;;
   logs)   run docker logs -f --tail 50 racer ;;
@@ -93,5 +111,5 @@ case "$cmd" in
              echo "(the car is stopped. Restart it with:  scripts/pi/car.sh car)" ;;
   oled-anim) stop_all; run "$OLED_PY" scripts/pi/oled_animate.py "$@"
              echo "(the car is stopped. Restart it with:  scripts/pi/car.sh car)" ;;
-  *)      sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *)      sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
 esac

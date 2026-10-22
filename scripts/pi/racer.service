@@ -1,4 +1,4 @@
-# Starts the whole car (Joy-Con, driver, LiDAR, autonomy, dashboard, OLED, person detection) at power-on.
+# Pulls the latest code from git (skipped if offline), then starts the whole car (Joy-Con, driver, LiDAR, autonomy, dashboard, OLED, person detection) at power-on.
 # The car stays idle until a controller connects; the dashboard shows whether one is connected.
 #
 # Install on the Pi (host, not in the container). If your Linux user or repo path differs, edit User= and the paths:
@@ -10,6 +10,7 @@
 [Unit]
 Description=Racer car (docker compose)
 After=docker.service bluetooth.service network-online.target
+Wants=network-online.target
 Requires=docker.service
 
 [Service]
@@ -19,6 +20,7 @@ User=maxwelllokshin
 WorkingDirectory=/home/maxwelllokshin/mk2
 ExecStart=/home/maxwelllokshin/mk2/scripts/pi/car.sh boot
 ExecStop=/home/maxwelllokshin/mk2/scripts/pi/car.sh stop
+TimeoutStartSec=240
 Restart=on-failure
 RestartSec=10
 
