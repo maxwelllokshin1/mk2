@@ -105,6 +105,8 @@ oled_display:
     lost_timeout_s: 2.0         # iris returns to center this long after the person leaves
     i2c_bus: 1
     i2c_address: 60             # 0x3C
+    second_i2c_address: 61      # 0x3D, second screen showing the same frame (0 = only one screen)
+    second_i2c_bus: -1          # -1 = same bus as i2c_bus; set e.g. 3 if the second screen is on its own bus
     driver: ssd1306             # sh1106 if the picture is shifted / has a noisy column
     rotate: 0
     preview_path: ''            # e.g. /tmp/oled.png writes what the screen shows (no screen needed)

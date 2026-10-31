@@ -2,6 +2,7 @@
 oled_device.py: the two ways the node can show a frame.
 
 LumaDisplay  the real SSD1306 / SH1106 over I2C (needs /dev/i2c-1 and luma.oled)
+MultiDisplay  several LumaDisplays showing the same frame (two eyes)
 NullDisplay  no hardware: keeps the last frame so it can be saved as a preview PNG
 """
 
@@ -39,3 +40,29 @@ class LumaDisplay:
             self.device.clear()
         except Exception:
             pass
+
+
+class MultiDisplay:
+    """Same frame on every screen. A screen that fails to open is skipped (and logged by the caller);
+    it only raises if none opened. A write failure on any screen raises, so the node reopens all."""
+    live = True
+
+    def __init__(self, specs):
+        self.devices, self.errors = [], []
+        for spec in specs:
+            try:
+                self.devices.append(LumaDisplay(*spec))
+            except Exception as exc:
+                self.errors.append(f'bus {spec[0]} addr {spec[1]:#04x}: {exc}')
+        if not self.devices:
+            raise RuntimeError('; '.join(self.errors))
+        self.last = None
+
+    def show(self, img):
+        for dev in self.devices:
+            dev.show(img)
+        self.last = img
+
+    def close(self):
+        for dev in self.devices:
+            dev.close()

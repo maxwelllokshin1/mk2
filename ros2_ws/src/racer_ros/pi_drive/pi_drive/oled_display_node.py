@@ -25,7 +25,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Point, PointStamped
 from ament_index_python.packages import get_package_share_directory
 
-from pi_drive.oled_device import LumaDisplay, NullDisplay
+from pi_drive.oled_device import MultiDisplay, NullDisplay
 from pi_drive.oled_layers import Compositor, ease, load_layer, person_to_center
 
 
@@ -52,6 +52,8 @@ class OledDisplay(Node):
         d('lost_timeout_s', 2.0)
         d('i2c_bus', 1)
         d('i2c_address', 0x3C)
+        d('second_i2c_address', 0x3D)                        # second screen, same frame. 0 = single screen
+        d('second_i2c_bus', -1)                              # -1 = same bus as i2c_bus
         d('driver', 'ssd1306')                               # or sh1106
         d('rotate', 0)
         d('preview_path', '')                                # e.g. /tmp/oled.png, written once a second
@@ -104,9 +106,16 @@ class OledDisplay(Node):
         self.last_open_try = time.monotonic()
         p = lambda n: self.get_parameter(n).value
         try:
-            self.display = LumaDisplay(int(p('i2c_bus')), int(p('i2c_address')), p('driver'), int(p('rotate')))
+            bus, rot = int(p('i2c_bus')), int(p('rotate'))
+            specs = [(bus, int(p('i2c_address')), p('driver'), rot)]
+            if int(p('second_i2c_address')):
+                bus2 = int(p('second_i2c_bus'))
+                specs.append((bus if bus2 < 0 else bus2, int(p('second_i2c_address')), p('driver'), rot))
+            self.display = MultiDisplay(specs)
             self.last_bytes = None
-            self.get_logger().info('OLED connected')
+            self.get_logger().info(f'OLED connected: {len(self.display.devices)}/{len(specs)} screens')
+            for err in self.display.errors:
+                self.get_logger().warn(f'OLED skipped, {err}')
         except Exception as exc:
             self.display = NullDisplay()
             self.get_logger().warn(f'OLED not available ({exc}); retrying every 5 s',
