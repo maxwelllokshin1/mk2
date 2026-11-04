@@ -9,6 +9,8 @@ Publishes
     /person_detected  std_msgs/Bool                every detection cycle
 
 Only one person is reported: the largest box (closest), or the most confident (`select`).
+While the car is driving (/drive_cmd throttle above drive_throttle_min) nothing is detected (pause_while_driving):
+no person is reported, and the CPU is free for driving. Detection resumes drive_hold_s after the car is still.
 
 `source`:
     tcp://127.0.0.1:8888   Raspberry Pi ribbon (CSI) camera: the HOST runs `rpicam-vid` and streams MJPEG
@@ -25,7 +27,7 @@ import time
 import cv2
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32MultiArray
 from geometry_msgs.msg import PointStamped
 from sensor_msgs.msg import CompressedImage
 from ament_index_python.packages import get_package_share_directory
@@ -54,6 +56,9 @@ class PersonDetectorNode(Node):
         d('cv_threads', 2)
         d('preview_hz', 4.0)             # JPEG preview for the dashboard Camera tab (0 = off)
         d('preview_quality', 55)
+        d('pause_while_driving', True)   # no detection while the car drives
+        d('drive_throttle_min', 0.05)    # |throttle| above this = driving
+        d('drive_hold_s', 1.0)           # still "driving" this long after the throttle drops
         d('debug_image_path', '')        # e.g. /tmp/person.jpg: last frame with the box, once a second
 
         p = lambda n: self.get_parameter(n).value
@@ -69,6 +74,10 @@ class PersonDetectorNode(Node):
             self.get_logger().error(f'model not loaded ({exc}); no detections will be published')
 
         self.select = p('select')
+        self.pause = bool(p('pause_while_driving'))
+        self.thr_min, self.drive_hold = float(p('drive_throttle_min')), float(p('drive_hold_s'))
+        self.last_drive = None
+        self.was_paused = False
         self.debug_path = p('debug_image_path')
         self.last_debug = 0.0
         self.preview_quality = int(p('preview_quality'))
@@ -86,6 +95,7 @@ class PersonDetectorNode(Node):
         self.person_pub = self.create_publisher(PointStamped, '/person', 10)
         self.detected_pub = self.create_publisher(Bool, '/person_detected', 10)
         self.preview_pub = self.create_publisher(CompressedImage, '/camera/image/jpeg', 1)
+        self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
         threading.Thread(target=self._capture_loop, daemon=True).start()
         self.create_timer(1.0 / float(p('detect_hz')), self._detect)
         if float(p('preview_hz')) > 0:
@@ -142,9 +152,25 @@ class PersonDetectorNode(Node):
             cap.release()
 
     # ---- detection timer ----
+    def _on_cmd(self, msg):
+        if len(msg.data) >= 2 and abs(msg.data[1]) > self.thr_min:
+            self.last_drive = time.monotonic()
+
+    def _driving(self):
+        return self.last_drive is not None and time.monotonic() - self.last_drive < self.drive_hold
+
     def _detect(self):
         if self.detector is None:
             return
+        if self.pause and self._driving():                # driving: skip the detector (saves the CPU too)
+            if not self.was_paused:
+                self.was_paused = True
+                self.detected_pub.publish(Bool(data=False))
+                self.get_logger().info('driving: person detection paused')
+            return
+        if self.was_paused:
+            self.was_paused = False
+            self.get_logger().info('stopped: person detection on')
         with self.lock:
             frame, fid = self.frame, self.frame_id
         if frame is None or fid == self.seen_id:

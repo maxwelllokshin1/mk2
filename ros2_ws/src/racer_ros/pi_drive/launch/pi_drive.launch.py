@@ -73,6 +73,36 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('oled'))
         )
 
+    # picks the expression (eyes) and speaks its voice lines
+    expression = Node(
+        package='pi_drive',
+        executable='expression_node',
+        name='expression',
+        output='screen',
+        parameters=[params_file],
+        condition=IfCondition(LaunchConfiguration('expressions'))
+        )
+
+    # counts laps from the LiDAR -> /lap_completed (expression_node goes excited)
+    lap = Node(
+        package='pi_drive',
+        executable='lap_node',
+        name='lap_detector',
+        output='screen',
+        parameters=[params_file],
+        condition=IfCondition(LaunchConfiguration('lap'))
+        )
+
+    # surprise (about to hit a wall) / collision (dizzy) from the LiDAR
+    hazard = Node(
+        package='pi_drive',
+        executable='hazard_node',
+        name='hazard',
+        output='screen',
+        parameters=[params_file],
+        condition=IfCondition(LaunchConfiguration('hazard'))
+        )
+
     # detect people using .onyx file
     # low priority so doesnt starve the memory
     person = Node(
@@ -153,6 +183,9 @@ def generate_launch_description():
         DeclareLaunchArgument('dashboard', default_value='true'),
         DeclareLaunchArgument('oled', default_value='true'),
         DeclareLaunchArgument('person', default_value='true'),
+        DeclareLaunchArgument('expressions', default_value='true'),
+        DeclareLaunchArgument('lap', default_value='true'),
+        DeclareLaunchArgument('hazard', default_value='true'),
         DeclareLaunchArgument('params_file', default_value=os.path.join(pi_dir, 'config', 'pi_drive.yaml')),
         # STARTUP NODES
         gpio_driver, 
@@ -160,6 +193,9 @@ def generate_launch_description():
         reactive, 
         dashboard,
         oled, 
+        expression,
+        lap,
+        hazard,
         person, 
         rplidar,
         lidar, 

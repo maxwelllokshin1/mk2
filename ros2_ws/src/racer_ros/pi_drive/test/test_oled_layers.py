@@ -84,3 +84,45 @@ def test_person_to_center_mapping():
 def test_ease():
     assert ease((0, 0), (10, 20), 0.5) == (5.0, 10.0)
     assert ease((0, 0), (10, 20), 1.0) == (10.0, 20.0)
+
+
+def _lid(n=4, delay=0.1):
+    from pi_drive.oled_layers import make_layer
+    frames = [Image.new('RGBA', (128, 64), (255, 255, 255, 255)) for _ in range(n)]
+    layer = make_layer(frames, [delay] * n, (64, 32))
+    layer.hold = True
+    return layer
+
+
+def test_lid_plays_once_then_holds_the_last_frame():
+    from pi_drive.oled_layers import hold_index
+    lid = _lid()
+    assert [hold_index(lid, t, None) for t in (0.0, 0.15, 0.25, 0.35)] == [0, 1, 2, 3]
+    assert hold_index(lid, 5.0, None) == 3 and hold_index(lid, 500.0, None) == 3     # holds
+
+
+def test_lid_plays_backwards_once_closing_starts_and_ends_on_the_first_frame():
+    from pi_drive.oled_layers import hold_index
+    lid = _lid()
+    seen = [hold_index(lid, 10.0 + u, 10.0) for u in (0.0, 0.05, 0.15, 0.25, 0.35, 0.39, 0.5, 9.0)]
+    assert seen[0] == 3 and seen[-1] == 0 and seen[-2] == 0
+    assert seen == sorted(seen, reverse=True)                                        # never goes forward again
+
+
+def test_mirror_flips_the_layer_left_to_right(tmp_path):
+    from pi_drive.oled_layers import load_layer
+    img = Image.new('RGBA', (8, 4), (0, 0, 0, 0))
+    img.putpixel((0, 0), (255, 255, 255, 255))
+    img.save(tmp_path / 'a.png')
+    plain, flipped = load_layer(str(tmp_path / 'a.png')), load_layer(str(tmp_path / 'a.png'), mirror=True)
+    assert plain.alpha[0].getpixel((0, 0)) == 255 and flipped.alpha[0].getpixel((7, 0)) == 255
+
+
+def test_iris_stays_out_from_under_the_lid():
+    from pi_drive.oled_layers import make_layer, open_centers
+    lid = make_layer([Image.new('RGBA', (128, 64), (255, 255, 255, 255))], [0.1], (64, 32))
+    lid.frames[0].paste((0, 0, 0, 0), (0, 40, 128, 64))                               # lid covers rows 0-39
+    lid = make_layer([lid.frames[0]], [0.1], (64, 32))
+    iris = make_layer([Image.new('RGBA', (10, 10), (255, 255, 255, 255))], [0.1], (64, 32))
+    pts = open_centers(iris, [lid], (10, 118, 5, 60), tolerance=0)
+    assert pts and min(y for _, y in pts) >= 45 and max(y for _, y in pts) >= 58      # only below the lid

@@ -68,10 +68,16 @@ ESC's BEC or a battery — never from the Pi's 5 V pin. 3.3 V logic is fine for 
 USB webcam -> person_detector (YOLOv8 ONNX, OpenCV) --/person (x,y 0..1)--> oled_display --> 128x64 OLED
                                                       /oled/layer_xy (x,y pixels) ---^
 ```
-- **`oled_display`** stacks layers bottom -> top from `config/pi_drive.yaml` (`layers`, `layer_sizes`,
-  `layer_positions`). Default: `eyes/eyeball.png` (white), `eyes/eye.png` (iris, **the movable layer**),
-  `eyes/blink.gif` (eyelid, plays once every `gif_gap_s` = 4 s). Edit the images in
-  `config/eyes/` (PNG/GIF transparency is respected; images are scaled to `layer_sizes`).
+- **`oled_display`** shows the current expression (`/expression`, chosen by `expression_node`) on both screens.
+  The eyeball (`config/expressions/blinking/normal/eyes/base.png`) is under EVERY face; blinking faces
+  (normal, excited, sarcastic) blink with normal's `blink.gif` every `blink_every_s` = 10 s. Angry and bored add an
+  eyelid gif that plays, holds its last frame, and plays backwards just before the face ends; screen 2 shows it mirrored.
+  The iris stays where the lid leaves it visible. Each expression folder has a README.txt with its file names.
+- **`expression_node`** picks the face and speaks (the `.mp3` files in that face's `voice/` folder), both at random times.
+  Parked: normal / surprised / angry / sarcastic / excited / sleepy / bored. Driving: normal / angry / sarcastic.
+  SURPRISED also when the LiDAR sees a wall coming (`hazard_node`), DIZZY only on a collision, EXCITED also on a lap
+  (`/lap_completed`), after 60 s of driving, or the Joy-Con `excite_button`. Rules: `pi_drive/expressions.py`.
+- **Person detection pauses while the car drives** (`pause_while_driving`) and works again once it is still.
 - **Move the iris yourself:** publish `geometry_msgs/Point` (x, y = center in display pixels) to `/oled/layer_xy`:
   `ros2 topic pub --once /oled/layer_xy geometry_msgs/msg/Point "{x: 40.0, y: 30.0}"`.
   Positions are clamped to `move_limits` and eased (`track_smooth`).
@@ -99,7 +105,7 @@ USB webcam -> person_detector (YOLOv8 ONNX, OpenCV) --/person (x,y 0..1)--> oled
   `oled_animate.py` on the host at the same time (stop the container first: `docker compose -f docker-compose.pi.yml stop`).
 - Compose needs `/dev/i2c-1` to exist when the container starts (enable I2C), and your group ids in `.env`
   (see scripts/pi/README.md).
-- Launch flags: `oled:=false`, `person:=false`.
+- Launch flags: `oled:=false`, `person:=false`, `expressions:=false`, `lap:=false`, `hazard:=false`.
 
 **CPU warning:** YOLO on a Pi 3 takes roughly 0.5-1.5 s per frame and keeps cores busy. The GPIO driver makes
 its servo/ESC pulses in software, so heavy CPU load can add jitter. If the servo twitches while the camera runs,

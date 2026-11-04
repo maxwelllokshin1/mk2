@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32, Float32MultiArray, String
+from std_msgs.msg import Empty, Float32, Float32MultiArray, String
 from ackermann_msgs.msg import AckermannDriveStamped
 from rcl_interfaces.msg import SetParametersResult
 
@@ -54,6 +54,13 @@ def apply_deadzone(v, dz):
 class MixerConfig:
     steer_deadzone: float = 0.12
     steer_sign: float = -1.0           # raw stick axis -> + = left. Flip if steering is backwards
+    # Speed-sensitive steering: the wheels follow the stick, but never faster than
+    #   rate = steer_rate_min + steer_rate_gain * v * (1 + v)      (v = how fast the stick moves, full-lock-units / s)
+    # so a slow push builds up slowly and a hard flick gets to full lock almost instantly.
+    # steer_rate_gain 0 = off (wheels jump straight to the stick).
+    steer_rate_min: float = 0.25       # slowest the wheels may move (full lock per s); also how fast they settle when the stick stops
+    steer_rate_gain: float = 0.8       # bigger = follows the stick more eagerly
+    steer_vel_hold_s: float = 0.25     # a fast flick keeps the fast rate this long, so the wheels can finish the move
     rc_forward: float = 0.30           # max forward throttle (stick fully forward, or while A is held)
     rc_reverse: float = 0.25           # throttle (magnitude) while B is held
     throttle_deadzone: float = 0.12    # stick deadzone for the drive axis
@@ -84,18 +91,39 @@ class Inputs:
 class Mixer:
     def __init__(self, cfg: MixerConfig):
         self.cfg = cfg
+        self._target = self._out = 0.0     # stick steering wanted / steering actually sent
+        self._vel = 0.0                    # recent stick speed (peak, decaying), full-lock-units / s
+
+    def _shape_steer(self, target, dt):
+        """Slew-limit the steering by how fast the stick is being moved."""
+        c = self.cfg
+        if dt is None or dt <= 0.0 or c.steer_rate_gain <= 0.0:
+            self._target = self._out = target
+            self._vel = 0.0
+            return target
+        v_now = abs(target - self._target) / dt
+        decay = math.exp(-dt / max(c.steer_vel_hold_s, 1e-3))
+        self._vel = max(v_now, self._vel * decay)
+        self._target = target
+        rate = c.steer_rate_min + c.steer_rate_gain * self._vel * (1.0 + self._vel)
+        step = rate * dt
+        self._out = target if abs(target - self._out) <= step else self._out + math.copysign(step, target - self._out)
+        return self._out + 0.0
 
     def mix(self, inp: Inputs, auto_steer_rad: float = 0.0,
-            auto_speed: float = 0.0, auto_age_s: float = float('inf')):
+            auto_speed: float = 0.0, auto_age_s: float = float('inf'), dt=None):
         c = self.cfg
 
         if not inp.have_steer and not inp.have_buttons:
+            self._shape_steer(0.0, None)
             return 0.0, 0.0, 'NO_CONTROLLER'
 
         if inp.have_buttons and inp.r:
             if auto_age_s > c.auto_timeout_s:
+                self._shape_steer(0.0, None)
                 return 0.0, 0.0, 'AUTO_WAITING'
             steering = clamp(auto_steer_rad / c.auto_max_steer_rad, -1.0, 1.0)
+            self._shape_steer(steering, None)      # back to RC later starts from where autonomy left the wheels
             if auto_speed > c.auto_speed_deadband:
                 if c.auto_speed_ref_mps > 0.0:
                     # follow reactive_node's own speed (it already slows for tight tracks / corners)
@@ -113,6 +141,7 @@ class Mixer:
         steering = 0.0
         if inp.have_steer:
             steering = clamp(c.steer_sign * apply_deadzone(inp.stick, c.steer_deadzone), -1.0, 1.0) + 0.0  # + 0.0 turns -0.0 into 0.0
+        steering = self._shape_steer(steering, dt)
 
         throttle = 0.0
         if inp.use_axis_throttle:
@@ -148,6 +177,7 @@ class JoyconTeleop(Node):
         self.declare_parameter('a_button', 'BTN_EAST')
         self.declare_parameter('b_button', 'BTN_SOUTH')
         self.declare_parameter('autonomy_button', 'BTN_TR')
+        self.declare_parameter('excite_button', 'BTN_DPAD_UP')  # makes the car EXCITED (eyes + voice); '' = off
 
         self.mixer = Mixer(MixerConfig(**{k: float(self.get_parameter(k).value) for k in cfg.__dict__}))
         self.left_names = [s.lower() for s in self.get_parameter('left_name_contains').value]
@@ -164,6 +194,7 @@ class JoyconTeleop(Node):
         self.auto_speed = 0.0
         self.auto_time = None
         self.mode = None
+        self.last_pub_t = None
         self.auto_on = False        # toggled by holding the autonomy button; False = RC
         self.btn_auto_down = False  # raw state of the autonomy button
         self.auto_press_t = None    # when it went down
@@ -171,6 +202,7 @@ class JoyconTeleop(Node):
         self.toggle_hold_s = float(self.get_parameter('autonomy_toggle_hold_s').value)
 
         self.throttle_code = None
+        self.excite_code = None
         if evdev is None:
             self.get_logger().error('python3-evdev is not installed; no Joy-Con input')
         else:
@@ -182,6 +214,7 @@ class JoyconTeleop(Node):
             self.a_code = ecodes.ecodes.get(self.get_parameter('a_button').value)
             self.b_code = ecodes.ecodes.get(self.get_parameter('b_button').value)
             self.r_code = ecodes.ecodes.get(self.get_parameter('autonomy_button').value)
+            self.excite_code = ecodes.ecodes.get(self.get_parameter('excite_button').value)
             for name, code in (('steer_axis', self.steer_code), ('a_button', self.a_code),
                                ('b_button', self.b_code), ('autonomy_button', self.r_code)):
                 if code is None:
@@ -190,6 +223,7 @@ class JoyconTeleop(Node):
         self.cmd_pub = self.create_publisher(Float32MultiArray, '/drive_cmd', 10)
         self.mode_pub = self.create_publisher(String, '/drive_mode', 10)
         self.progress_pub = self.create_publisher(Float32, '/mode_toggle_progress', 10)
+        self.excite_pub = self.create_publisher(Empty, '/excite', 10)
         self.create_subscription(AckermannDriveStamped, '/drive', self._on_drive, 10)
 
         self.create_timer(1.0 / float(self.get_parameter('poll_hz').value), self._poll)
@@ -296,6 +330,8 @@ class JoyconTeleop(Node):
                 self.inputs.a = down
             elif ev.code == self.b_code:
                 self.inputs.b = down
+            elif ev.code == self.excite_code and ev.value == 1:     # on the press only, not the hold / release
+                self.excite_pub.publish(Empty())
             elif ev.code == self.r_code:
                 if down and not self.btn_auto_down:
                     self.auto_press_t = self._now_s()
@@ -308,7 +344,8 @@ class JoyconTeleop(Node):
 
     # parameters the dashboard may change while the car runs, with their allowed range
     LIVE_RANGES = {'rc_forward': (0.0, 1.0), 'rc_reverse': (0.0, 1.0), 'auto_max_throttle': (0.0, 1.0),
-                   'steer_deadzone': (0.0, 0.9), 'throttle_deadzone': (0.0, 0.9)}
+                   'steer_deadzone': (0.0, 0.9), 'throttle_deadzone': (0.0, 0.9),
+                   'steer_rate_min': (0.02, 20.0), 'steer_rate_gain': (0.0, 20.0), 'steer_vel_hold_s': (0.01, 2.0)}
 
     def _on_params(self, params):
         for p in params:
@@ -360,7 +397,10 @@ class JoyconTeleop(Node):
         self._update_auto_toggle()
         self.inputs.r = self.auto_on   # the mixer's "autonomy" flag is now the toggle, not the raw button
         age = (self.get_clock().now() - self.auto_time).nanoseconds / 1e9 if self.auto_time else float('inf')
-        steering, throttle, mode = self.mixer.mix(self.inputs, self.auto_steer, self.auto_speed, age)
+        now = self._now_s()
+        dt = min(now - self.last_pub_t, 0.2) if self.last_pub_t is not None else None
+        self.last_pub_t = now
+        steering, throttle, mode = self.mixer.mix(self.inputs, self.auto_steer, self.auto_speed, age, dt)
 
         if mode != self.mode:
             self.get_logger().info(f'mode: {mode}')

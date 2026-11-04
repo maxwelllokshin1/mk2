@@ -16,8 +16,10 @@ setup(
             glob(os.path.join('launch', '*launch.[pxy][yma]*'))),
         (os.path.join('share', package_name, 'config'),
             glob(os.path.join('config', '*.yaml')) + glob(os.path.join('config', '*.onnx'))),
-        (os.path.join('share', package_name, 'config', 'eyes'),
-            glob(os.path.join('config', 'eyes', '*'))),
+    ] + [
+        # every picture / mp3 under config/expressions, keeping the folder layout
+        (os.path.join('share', package_name, root), [os.path.join(root, f) for f in files])
+        for root, _, files in os.walk(os.path.join('config', 'expressions')) if files
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -32,6 +34,9 @@ setup(
             'joycon_probe = pi_drive.joycon_probe:main',
             'oled_display_node = pi_drive.oled_display_node:main',
             'person_node = pi_drive.person_node:main',
+            'expression_node = pi_drive.expression_node:main',
+            'lap_node = pi_drive.lap_node:main',
+            'hazard_node = pi_drive.hazard_node:main',
         ],
     },
 )

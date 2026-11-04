@@ -29,6 +29,7 @@ services:
       # - /dev/gpiomem:/dev/gpiomem
       # Must EXIST when the container starts (enable I2C) or docker refuses to start it.
       - /dev/i2c-1:/dev/i2c-1       # OLED
+      - /dev/snd:/dev/snd           # I2S speakers (exists on a Pi 5 even before the amps are set up)
       # USB webcam only (the ribbon camera is streamed in over tcp, no device needed):
       # - /dev/video0:/dev/video0
       # - /dev/ttyACM0:/dev/ttyACM0   # VESC / Arduino, uncomment if used
@@ -38,6 +39,7 @@ services:
       - "${DIALOUT_GID:-20}"
       - "${INPUT_GID:-105}"     # Joy-Cons show up as /dev/input/event* (group "input")
       - "${I2C_GID:-995}"       # OLED: group "i2c"
+      - "${AUDIO_GID:-29}"      # speakers: group "audio"
     # Joy-Cons connect AFTER the container starts, so mount the whole directory
     # (new event nodes appear live) and allow input devices (char major 13).
     device_cgroup_rules:
