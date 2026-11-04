@@ -7,15 +7,16 @@
 gpio_driver:
   ros__parameters:
     # ---- PINS: BCM GPIO numbers (not header pin numbers). -1 = not connected.
-    # Both -1 -> DRY RUN (nothing moves). Steering = GPIO18, throttle = GPIO19 (hardware PWM). Set -1 to disable either.
-    steer_gpio: 18              # header pin 12
-    throttle_gpio: 19           # header pin 35 = hardware PWM channel 3 (needs dtoverlay=pwm-2chan)
+    # Both -1 -> DRY RUN (nothing moves). Steering = GPIO12, throttle = GPIO13 (hardware PWM). Set -1 to disable either.
+    # GPIO18/19/21 are taken by the I2S speaker amps (dtoverlay=hifiberry-dac).
+    steer_gpio: 12              # header pin 32
+    throttle_gpio: 13           # header pin 33 = hardware PWM channel 1 (needs dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4)
     gpiochip: 0
     # Steering pulses: "auto" = hardware PWM (steady) if /sys/class/pwm/pwmchip2 is there, else software (jitters).
-    # Needs dtoverlay=pwm-2chan in config.txt (pi_setup.sh adds it). Pi 5: chip 0 (older kernels: 2), channel 2 = GPIO18, 3 = GPIO19.
+    # Needs dtoverlay=pwm-2chan in config.txt (pi_setup.sh adds it). Pi 5: chip 0 (older kernels: 2), channel 0 = GPIO12, 1 = GPIO13.
     pwm_backend: auto
     pwm_chip: 0
-    pwm_channel: 2
+    pwm_channel: 0
 
     command_timeout_s: 0.5      # no /drive_cmd for this long -> steering centered, throttle neutral
     arm_time_s: 3.0             # ESC held at neutral this long after start

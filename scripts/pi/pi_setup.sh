@@ -34,8 +34,10 @@ CFG=/boot/firmware/config.txt; [ -f "$CFG" ] || CFG=/boot/config.txt
 if [ "$IS_PI5" = 0 ]; then
   grep -q '^gpu_mem=' "$CFG" && sed -i 's/^gpu_mem=.*/gpu_mem=64/' "$CFG" || echo 'gpu_mem=64' >> "$CFG"
 fi
-# Hardware PWM on GPIO18/19 for the steering servo (steady pulses), writable by group gpio
-grep -q '^dtoverlay=pwm-2chan' "$CFG" || echo 'dtoverlay=pwm-2chan' >> "$CFG"
+# Hardware PWM on GPIO12/13 for the steering servo + ESC (steady pulses), writable by group gpio.
+# GPIO18/19/21 are left free for the I2S speaker amps.
+grep -q '^dtoverlay=pwm-2chan' "$CFG" || echo 'dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4' >> "$CFG"
+grep -q '^dtoverlay=hifiberry-dac' "$CFG" || echo 'dtoverlay=hifiberry-dac' >> "$CFG"
 cat > /etc/udev/rules.d/99-racer-pwm.rules <<'CONF'
 SUBSYSTEM=="pwm", ACTION=="add|change", RUN+="/bin/sh -c 'chgrp -R gpio /sys%p && chmod -R g=u /sys%p'"
 CONF
