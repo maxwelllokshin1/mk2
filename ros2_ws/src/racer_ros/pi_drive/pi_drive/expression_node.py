@@ -14,10 +14,12 @@ Output:
     /expression          String (latched)                   e.g. 'sleepy'
     /expression_closing  String                             eyelid faces: start playing the lid backwards
 
-Playback is mpg123, one line at a time; volume is its software scale, so 0.75 = 75 %.
+Playback is one line at a time: .mp3 through mpg123, .m4a/.wav/.ogg/.flac/.aac through ffmpeg into aplay.
+Volume is a software scale, so 0.75 = 75 %.
 """
 import os
 import shutil
+import signal
 import subprocess
 import time
 
@@ -56,7 +58,9 @@ class ExpressionNode(Node):
         self.last_drive = self.last_person = None
 
         if shutil.which('mpg123') is None:
-            self.get_logger().error('mpg123 not found: no sound will play (apt install mpg123)')
+            self.get_logger().error('mpg123 not found: no .mp3 will play (apt install mpg123)')
+        if shutil.which('ffmpeg') is None or shutil.which('aplay') is None:
+            self.get_logger().warn('ffmpeg/aplay not found: .m4a/.wav/.ogg lines will not play (apt install ffmpeg alsa-utils)')
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
         self.expr_pub = self.create_publisher(String, '/expression', latched)
@@ -95,28 +99,41 @@ class ExpressionNode(Node):
 
     def _stop(self):
         if self.proc is not None:
-            self.proc.terminate()
+            self._signal(signal.SIGTERM)
             try:
                 self.proc.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                self._signal(signal.SIGKILL)
         self.proc = None
 
+    def _signal(self, sig):
+        try:
+            os.killpg(self.proc.pid, sig)          # the whole ffmpeg | aplay pipeline, not just the shell
+        except OSError:
+            pass
+
+    def _command(self, path):
+        if path.lower().endswith('.mp3'):
+            cmd = ['mpg123', '-q', '-f', str(self.scale)]
+            if self.device != 'default':
+                cmd += ['-a', self.device]
+            return cmd + [path]
+        # anything else (.m4a ...): ffmpeg decodes and scales to a wav stream, aplay plays it
+        return ['sh', '-c', 'ffmpeg -v quiet -i "$1" -filter:a "volume=$2" -f wav - | aplay -q ${3:+-D "$3"} -',
+                'sh', path, f'{self.scale / 32768:.3f}', '' if self.device == 'default' else self.device]
+
     def _say(self, name, interrupt):
-        files = find_voice_files(self.root, name)         # re-read each time: new mp3s need no restart
+        files = find_voice_files(self.root, name)         # re-read each time: new voice files need no restart
         if not files:
-            self.get_logger().warn(f'no .mp3 voice lines for {name}', throttle_duration_sec=60.0)
+            self.get_logger().warn(f'no voice lines (.mp3/.m4a/.wav) for {name}', throttle_duration_sec=60.0)
             return
         if self._speaking():
             if not interrupt:
                 return
             self._stop()
         path = self.bags[name].next(files)
-        cmd = ['mpg123', '-q', '-f', str(self.scale)]
-        if self.device != 'default':
-            cmd += ['-a', self.device]
         try:
-            self.proc = subprocess.Popen(cmd + [path], stdin=subprocess.DEVNULL,
+            self.proc = subprocess.Popen(self._command(path), stdin=subprocess.DEVNULL, start_new_session=True,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.get_logger().info(f'{name}: {os.path.basename(path)}')
         except OSError as exc:

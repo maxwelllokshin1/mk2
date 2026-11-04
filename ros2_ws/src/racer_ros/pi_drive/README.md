@@ -73,7 +73,7 @@ USB webcam -> person_detector (YOLOv8 ONNX, OpenCV) --/person (x,y 0..1)--> oled
   (normal, excited, sarcastic) blink with normal's `blink.gif` every `blink_every_s` = 10 s. Angry and bored add an
   eyelid gif that plays, holds its last frame, and plays backwards just before the face ends; screen 2 shows it mirrored.
   The iris stays where the lid leaves it visible. Each expression folder has a README.txt with its file names.
-- **`expression_node`** picks the face and speaks (the `.mp3` files in that face's `voice/` folder), both at random times.
+- **`expression_node`** picks the face and speaks (the `.mp3` / `.m4a` files in that face's `voice/` folder), both at random times.
   Parked: normal / surprised / angry / sarcastic / excited / sleepy / bored. Driving: normal / angry / sarcastic.
   SURPRISED also when the LiDAR sees a wall coming (`hazard_node`), DIZZY only on a collision, EXCITED also on a lap
   (`/lap_completed`), after 60 s of driving, or the Joy-Con `excite_button`. Rules: `pi_drive/expressions.py`.

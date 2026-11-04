@@ -1,7 +1,8 @@
+import os
 import random
 
 from pi_drive.expressions import (CLOSING, DRIVE_POOL, EXPRESSIONS, IDLE_POOL, Director, ShuffleBag, Timing,
-                                  blinks, eye_plan)
+                                  blinks, eye_plan, find_voice_files)
 
 
 def run(director, seconds, driving=False, person=False, start=0.0, dt=0.1):
@@ -178,3 +179,11 @@ def test_every_face_builds_on_the_normal_eyeball_and_blinking_ones_borrow_its_bl
     assert eye_plan(str(tmp_path), 'angry')['iris'] == str(normal / 'iris.png')    # the iris is normal's
     assert eye_plan(str(tmp_path), 'angry')['lid'].endswith('eyelid.gif')
     assert eye_plan(str(tmp_path), 'dizzy')['iris'] is None
+
+
+def test_voice_files_accept_m4a_and_mp3(tmp_path):
+    voice = tmp_path / 'static' / 'angry' / 'voice'
+    voice.mkdir(parents=True)
+    for f in ('a.mp3', 'b.M4A', 'c.wav', 'README.txt', 'd.png'):
+        (voice / f).write_bytes(b'x')
+    assert [os.path.basename(f) for f in find_voice_files(str(tmp_path), 'angry')] == ['a.mp3', 'b.M4A', 'c.wav']

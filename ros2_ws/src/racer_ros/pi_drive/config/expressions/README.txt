@@ -1,7 +1,7 @@
 blinking/   expressions that blink every 10 s (with normal's blink.gif): normal, excited, sarcastic
 static/     expressions that never blink: surprised, angry, dizzy, sleepy, bored
 
-Each expression folder has eyes/ (pictures) and voice/ (.mp3 lines). See the README.txt inside each one.
+Each expression folder has eyes/ (pictures) and voice/ (.mp3 or .m4a lines). See the README.txt inside each one.
 Copy new files onto the Pi, then restart the car (scripts/pi/car.sh restart).
 
 When each one shows up:

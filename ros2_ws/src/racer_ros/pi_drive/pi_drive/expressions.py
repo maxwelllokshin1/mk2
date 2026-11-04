@@ -98,10 +98,13 @@ def eye_plan(root, name):
     return plan
 
 
+VOICE_EXTENSIONS = ('.mp3', '.m4a', '.wav', '.ogg', '.flac', '.aac')
+
+
 def find_voice_files(root, name):
     folder = os.path.join(expression_dir(root, name), 'voice')
     try:
-        return sorted(os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith('.mp3'))
+        return sorted(os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(VOICE_EXTENSIONS))
     except OSError:
         return []
 
