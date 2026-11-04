@@ -133,6 +133,7 @@ oled_display:
 expression:
   ros__parameters:
     volume: 1.0                 # 100 % (max)
+    normalize: true             # .m4a/.wav lines: raise quiet recordings to a loud, even level (ffmpeg loudnorm); false = play as recorded
     audio_device: 'plughw:CARD=sndrpihifiberry'   # `aplay -l` shows the card name; 'default' = system default
     drive_throttle_min: 0.05    # |throttle| above this = driving
     drive_hold_s: 3.0           # still "driving" this long after the throttle drops

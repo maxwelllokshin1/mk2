@@ -38,6 +38,7 @@ class ExpressionNode(Node):
         d = self.declare_parameter
         d('expressions_dir', '')                    # '' = the package config/expressions folder
         d('volume', 0.75)                           # 0..1
+        d('normalize', True)                        # .m4a/.wav/...: loudness-normalise quiet recordings (ffmpeg loudnorm)
         d('audio_device', 'plughw:CARD=sndrpihifiberry')   # ALSA device of the I2S amps ('default' = system default)
         d('drive_throttle_min', 0.05)               # |throttle| above this counts as driving
         d('drive_hold_s', 3.0)                      # stay in "driving" this long after the throttle drops
@@ -48,6 +49,7 @@ class ExpressionNode(Node):
         p = lambda n: self.get_parameter(n).value
         self.root = p('expressions_dir') or os.path.join(get_package_share_directory('pi_drive'), 'config', 'expressions')
         self.device = str(p('audio_device'))
+        self.normalize = bool(p('normalize'))
         self.scale = int(32768 * min(max(float(p('volume')), 0.0), 1.0))   # mpg123 -f: 32768 = 100 %
         self.thr_min = float(p('drive_throttle_min'))
         self.drive_hold = float(p('drive_hold_s'))
@@ -119,8 +121,10 @@ class ExpressionNode(Node):
                 cmd += ['-a', self.device]
             return cmd + [path]
         # anything else (.m4a ...): ffmpeg decodes and scales to a wav stream, aplay plays it
-        return ['sh', '-c', 'ffmpeg -v quiet -i "$1" -filter:a "volume=$2" -f wav - | aplay -q ${3:+-D "$3"} -',
-                'sh', path, f'{self.scale / 32768:.3f}', '' if self.device == 'default' else self.device]
+        gain = f'volume={self.scale / 32768:.3f}'
+        chain = f'loudnorm=I=-12:TP=-1:LRA=7,aresample=48000,{gain}' if self.normalize else gain
+        return ['sh', '-c', 'ffmpeg -v quiet -i "$1" -filter:a "$2" -f wav - | aplay -q ${3:+-D "$3"} -',
+                'sh', path, chain, '' if self.device == 'default' else self.device]
 
     def _say(self, name, interrupt):
         files = find_voice_files(self.root, name)         # re-read each time: new voice files need no restart
