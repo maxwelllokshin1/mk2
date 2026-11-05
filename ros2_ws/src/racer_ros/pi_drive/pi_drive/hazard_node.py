@@ -30,6 +30,7 @@ class HazardNode(Node):
         d('collision_m', 0.2)             # closer than this = hit it
         d('surprise_cooldown_s', 8.0)
         d('collision_cooldown_s', 10.0)
+        d('while_stationary', True)       # also react when the car is parked and something rushes at it
         d('drive_throttle_min', 0.05)     # forward throttle above this = driving forward
         d('drive_hold_s', 0.5)
         d('process_hz', 20.0)
@@ -39,7 +40,8 @@ class HazardNode(Node):
         self.thr_min, self.hold = float(p('drive_throttle_min')), float(p('drive_hold_s'))
         self.period = 1.0 / float(p('process_hz'))
         self.det = HazardDetector(float(p('surprise_m')), float(p('closing_mps')), float(p('collision_m')),
-                                  float(p('surprise_cooldown_s')), float(p('collision_cooldown_s')))
+                                  float(p('surprise_cooldown_s')), float(p('collision_cooldown_s')),
+                                  while_stationary=bool(p('while_stationary')))
         self.last_forward = None
         self.last_scan_t = 0.0
 
@@ -48,7 +50,7 @@ class HazardNode(Node):
         self.range_pub = self.create_publisher(Float32, '/front_range', 10)
         self.create_subscription(LaserScan, '/scan', self._on_scan, 10)
         self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
-        self.get_logger().info('hazard up: surprise / collision from the LiDAR while driving forward')
+        self.get_logger().info(f'hazard up: surprise / collision from the LiDAR (parked too: {self.det.while_stationary})')
 
     def _on_cmd(self, msg):
         if len(msg.data) >= 2 and msg.data[1] > self.thr_min:

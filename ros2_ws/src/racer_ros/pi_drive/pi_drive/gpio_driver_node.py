@@ -100,7 +100,9 @@ class GpioDriver(Node):
         self.declare_parameter('throttle_slew_per_s', 2.0)
         self.declare_parameter('reverse_neutral_s', 0.25)
         self.declare_parameter('steer_center_us', 1500.0)
-        self.declare_parameter('steer_range_us', 200.0)
+        self.declare_parameter('steer_us_per_deg', 6.667)       # servo pulse per degree: 30 deg = 200 us, as the old full lock was
+        self.declare_parameter('steer_left_deg', 30.0)          # full left lock, degrees from center (shown as negative)
+        self.declare_parameter('steer_right_deg', 30.0)         # full right lock, degrees from center
         self.declare_parameter('steer_sign', 1.0)
         self.declare_parameter('steer_min_us', 1300.0)
         self.declare_parameter('steer_max_us', 1700.0)
@@ -128,7 +130,9 @@ class GpioDriver(Node):
         self.slew = float(p('throttle_slew_per_s').value)
         self.reverse_neutral = float(p('reverse_neutral_s').value)
         self.steer_center = float(p('steer_center_us').value)
-        self.steer_range = float(p('steer_range_us').value)
+        self.us_per_deg = float(p('steer_us_per_deg').value)
+        self.left_deg = float(p('steer_left_deg').value)
+        self.right_deg = float(p('steer_right_deg').value)
         self.steer_sign = float(p('steer_sign').value)
         self.steer_min = float(p('steer_min_us').value)
         self.steer_max = float(p('steer_max_us').value)
@@ -189,7 +193,7 @@ class GpioDriver(Node):
 
         self.get_logger().info(
             f'GPIO DRIVER ON: steer_gpio={self.steer_pin} pwm={type(self.pwm).__name__ if self.pwm else "none"} '
-            f'(center {self.steer_center:.0f}us, +-{self.steer_range:.0f}us, '
+            f'(center {self.steer_center:.0f}us = 0 deg, left -{self.left_deg:.0f} deg, right +{self.right_deg:.0f} deg, '
             f'clamp {self.steer_min:.0f}-{self.steer_max:.0f}us) | '
             f'throttle_gpio={self.throttle_pin} {"ON" if self.thr_pwm else "off"} '
             f'(neutral {self.thr_neutral:.0f}us, fwd<={self.thr_fwd_max:.0f}, rev>={self.thr_rev_min:.0f}), '
@@ -225,8 +229,14 @@ class GpioDriver(Node):
             return None
 
     def _steering_to_us(self, steering):
-        us = self.steer_center + self.steer_sign * steering * self.steer_range
+        deg = self.left_deg if steering > 0 else self.right_deg      # steering > 0 = left, shown as negative degrees
+        us = self.steer_center + self.steer_sign * steering * deg * self.us_per_deg
         return clamp(us, self.steer_min, self.steer_max)
+
+    @property
+    def steer_range(self):
+        """us from center at the bigger of the two locks."""
+        return max(self.left_deg, self.right_deg) * self.us_per_deg
 
     def _throttle_to_us(self, t):
         if t == 0.0:
@@ -321,7 +331,8 @@ class GpioDriver(Node):
 
     # parameter -> (attribute it sets, lowest, highest). The dashboard may change these while the car runs.
     LIVE = {'throttle_slew_per_s': ('slew', 0.02, 5.0), 'steer_center_us': ('steer_center', 1000.0, 2000.0),
-            'steer_range_us': ('steer_range', 0.0, 500.0), 'recenter_overshoot_left_us': ('overshoot_left', 0.0, 200.0),
+            'steer_left_deg': ('left_deg', 0.0, 90.0), 'steer_right_deg': ('right_deg', 0.0, 90.0),
+            'steer_us_per_deg': ('us_per_deg', 0.5, 20.0), 'recenter_overshoot_left_us': ('overshoot_left', 0.0, 200.0),
             'recenter_overshoot_right_us': ('overshoot_right', 0.0, 200.0), 'recenter_overshoot_s': ('overshoot_s', 0.0, 1.0)}
 
     def _on_params(self, params):

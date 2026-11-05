@@ -2,10 +2,11 @@
 hazard_logic.py: "about to hit a wall" and "hit something" from the LiDAR's view straight ahead. Pure numpy, no ROS.
 
     front_range()    nearest thing in a narrow cone straight ahead
-    HazardDetector   needs the car to be driving FORWARD; then
-                       surprise   something ahead is close AND getting closer fast
-                       collision  something ahead is almost touching the lidar
-                     each with its own cooldown, so one wall gives one reaction
+    HazardDetector   surprise   something ahead is close AND getting closer fast
+                     collision  something ahead is almost touching the lidar
+                     Driving forward: both count. Parked (while_stationary): a surprise still counts when something
+                     rushes at the car, and a collision only if it arrived fast (so parking next to a wall is calm).
+                     Each has its own cooldown, so one wall gives one reaction.
 """
 import math
 from collections import deque
@@ -24,9 +25,10 @@ def front_range(ranges, angle_min, angle_increment, cone_deg=20.0, min_valid=0.0
 
 class HazardDetector:
     def __init__(self, surprise_m=0.9, closing_mps=0.5, collision_m=0.2,
-                 surprise_cooldown_s=8.0, collision_cooldown_s=10.0, window_s=0.4):
+                 surprise_cooldown_s=8.0, collision_cooldown_s=10.0, window_s=0.4, while_stationary=True):
         self.surprise_m, self.closing_mps, self.collision_m = surprise_m, closing_mps, collision_m
         self.surprise_cooldown, self.collision_cooldown, self.window = surprise_cooldown_s, collision_cooldown_s, window_s
+        self.while_stationary = while_stationary
         self.history = deque()                  # (t, front range)
         self.last_surprise = self.last_collision = -1e9
 
@@ -43,9 +45,10 @@ class HazardDetector:
         """One scan. Returns 'collision', 'surprise' or None."""
         speed = self.closing_speed(now, front)
         self.history.append((now, front))
-        if not driving_forward or not math.isfinite(front):
+        if not math.isfinite(front) or not (driving_forward or self.while_stationary):
             return None
-        if front < self.collision_m and now - self.last_collision >= self.collision_cooldown:
+        arrived_fast = driving_forward or speed > self.closing_mps
+        if front < self.collision_m and arrived_fast and now - self.last_collision >= self.collision_cooldown:
             self.last_collision = self.last_surprise = now            # a crash also covers the surprise
             return 'collision'
         if front < self.surprise_m and speed > self.closing_mps and now - self.last_surprise >= self.surprise_cooldown:

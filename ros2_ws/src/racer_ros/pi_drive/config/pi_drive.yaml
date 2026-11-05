@@ -25,7 +25,11 @@ gpio_driver:
 
     # ---- steering servo (all PLACEHOLDERS: measure your servo, start with small ranges)
     steer_center_us: 1500.0
-    steer_range_us: 200.0       # us from center at full lock
+    # Steering in degrees: the pose the servo is in when the wheels point straight (steer_center_us) is 0 deg,
+    # left is NEGATIVE, right is POSITIVE. Set each side's full lock separately.
+    steer_us_per_deg: 6.667     # pulse change per degree: 6.667 makes 30 deg = 200 us, the old full lock. Measure your servo and correct it
+    steer_left_deg: 30.0        # full left lock = -30 deg. Raise it if the car still turns less to the left (also lift steer_max_us/steer_min_us below, they cap the pulse)
+    steer_right_deg: 30.0       # full right lock = +30 deg
     steer_sign: 1.0             # flip to -1.0 if left turns right
     steer_min_us: 1300.0        # hard clamps, set just inside the mechanical end stops
     steer_max_us: 1700.0
@@ -165,6 +169,7 @@ expression:
 hazard:
   ros__parameters:
     cone_deg: 20.0              # straight ahead +- this many degrees
+    while_stationary: true      # also SURPRISED when parked and something rushes at the car (false = only while driving forward)
     surprise_m: 0.9             # closer than this AND closing in fast = SURPRISED
     closing_mps: 0.5            # "fast" = the gap shrinks at least this many m/s
     collision_m: 0.2            # closer than this = DIZZY (depends how far the lidar sits behind the bumper)

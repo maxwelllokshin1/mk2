@@ -35,9 +35,20 @@ def test_hitting_it_is_a_collision_and_one_crash_is_one_reaction():
     assert out.count('collision') == 1 and out.count('surprise') <= 1
 
 
-def test_nothing_happens_when_not_driving_forward():
-    det = HazardDetector()
+def test_nothing_happens_when_not_driving_forward_if_stationary_is_off():
+    det = HazardDetector(while_stationary=False)
     assert not any(det.update(i * 0.05, max(2.0 - i * 0.1, 0.1), False) for i in range(40))
+
+
+def test_parked_car_is_surprised_when_something_rushes_at_it():
+    det = HazardDetector()
+    out = [det.update(i * 0.05, 3.0 - i * 0.1, False) for i in range(25)]      # a wall / person closing at 2 m/s
+    assert out.count('surprise') == 1
+
+
+def test_parked_next_to_a_wall_is_calm():
+    det = HazardDetector()
+    assert not any(det.update(i * 0.05, 0.15, False) for i in range(40))       # 0.15 m from the lidar, not moving
 
 
 def test_parked_close_to_a_wall_or_crawling_is_no_surprise():

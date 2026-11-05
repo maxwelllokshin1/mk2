@@ -68,9 +68,17 @@ TUNABLE_PARAMS = {
         'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Steering center (µs)', 'default': 1500.0,
         'desc': 'Servo pulse for straight wheels. Nudge it up or down until the car rolls straight.',
     },
-    'steer_range_us': {
-        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Steering range (µs)', 'default': 200.0,
-        'desc': 'How far from center the servo goes at full lock. Limited by the end stops set in the config file.',
+    'steer_left_deg': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Full left lock (degrees)', 'default': 30.0,
+        'desc': 'How far left of center the servo goes at full lock (shown as negative). Raise it if the car turns less to the left than to the right.',
+    },
+    'steer_right_deg': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Full right lock (degrees)', 'default': 30.0,
+        'desc': 'How far right of center the servo goes at full lock (positive).',
+    },
+    'steer_us_per_deg': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Servo µs per degree', 'default': 6.667,
+        'desc': 'Pulse width change per degree. If 30 degrees looks like more or less than 30 degrees, change this.',
     },
     'recenter_overshoot_left_us': {
         'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Recenter kick after a left turn (µs)', 'default': 40.0,
