@@ -77,7 +77,7 @@ TUNABLE_PARAMS = {
         'desc': 'How far right of center the servo goes at full lock (positive).',
     },
     'steer_auto_limit_deg': {
-        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Autonomy max steering (degrees)', 'default': 25.0,
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Autonomy max steering (degrees)', 'default': 30.0,
         'desc': 'In autonomous mode the wheels never turn further than this either way, even if the planner asks for more. Manual driving keeps the full lock.',
     },
     'steer_us_per_deg': {

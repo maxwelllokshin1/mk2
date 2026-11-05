@@ -103,7 +103,7 @@ class GpioDriver(Node):
         self.declare_parameter('steer_us_per_deg', 6.667)       # servo pulse per degree: 30 deg = 200 us, as the old full lock was
         self.declare_parameter('steer_left_deg', 30.0)          # full left lock, degrees from center (shown as negative)
         self.declare_parameter('steer_right_deg', 30.0)         # full right lock, degrees from center
-        self.declare_parameter('steer_auto_limit_deg', 25.0)    # autonomy never steers past this many degrees either way
+        self.declare_parameter('steer_auto_limit_deg', 30.0)    # autonomy never steers past this many degrees either way
         self.declare_parameter('steer_sign', 1.0)
         self.declare_parameter('steer_min_us', 1300.0)
         self.declare_parameter('steer_max_us', 1700.0)
