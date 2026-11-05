@@ -30,6 +30,7 @@ gpio_driver:
     steer_us_per_deg: 6.667     # pulse change per degree: 6.667 makes 30 deg = 200 us, the old full lock. Measure your servo and correct it
     steer_left_deg: 30.0        # full left lock = -30 deg. Raise it if the car still turns less to the left (also lift steer_max_us/steer_min_us below, they cap the pulse)
     steer_right_deg: 30.0       # full right lock = +30 deg
+    steer_auto_limit_deg: 25.0  # in AUTONOMOUS mode the wheels never turn past this many degrees either way (the Joy-Con still gets the full lock)
     steer_sign: 1.0             # flip to -1.0 if left turns right
     steer_min_us: 1300.0        # hard clamps, set just inside the mechanical end stops
     steer_max_us: 1700.0
@@ -71,9 +72,9 @@ joycon_teleop:
     # ceiling: raise it step by step as the car does well. Keep auto_speed_ref_mps equal to
     # follow_the_gap gap_params speed_max (0.0 = ignore its speed, use fixed auto_throttle).
     auto_speed_ref_mps: 15.0
-    auto_max_throttle: 0.25
+    auto_max_throttle: 1.0
     auto_min_throttle: 0.12
-    auto_throttle: 0.25
+    auto_throttle: 1.0
     auto_reverse_throttle: 0.25
     auto_max_steer_rad: 0.52    # = reactive_node max_steering (30 deg)
     auto_timeout_s: 0.5

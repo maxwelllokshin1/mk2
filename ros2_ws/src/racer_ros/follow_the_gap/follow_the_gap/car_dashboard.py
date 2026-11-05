@@ -76,6 +76,10 @@ TUNABLE_PARAMS = {
         'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Full right lock (degrees)', 'default': 30.0,
         'desc': 'How far right of center the servo goes at full lock (positive).',
     },
+    'steer_auto_limit_deg': {
+        'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Autonomy max steering (degrees)', 'default': 25.0,
+        'desc': 'In autonomous mode the wheels never turn further than this either way, even if the planner asks for more. Manual driving keeps the full lock.',
+    },
     'steer_us_per_deg': {
         'node': 'gpio_driver', 'group': 'Steering', 'type': 'double', 'label': 'Servo µs per degree', 'default': 6.667,
         'desc': 'Pulse width change per degree. If 30 degrees looks like more or less than 30 degrees, change this.',
