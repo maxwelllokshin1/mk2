@@ -37,9 +37,9 @@ gpio_driver:
     # other side first, hold for recenter_overshoot_s, then settle on center. Bigger turn = bigger kick,
     # up to the per-side maximum below. LEFT / RIGHT = the way the wheels turned before returning.
     # Right side stops short -> raise the right value; set a side to 0.0 to turn its kick off.
-    recenter_overshoot_left_us: 40.0
-    recenter_overshoot_right_us: 80.0
-    recenter_overshoot_s: 0.15
+    recenter_overshoot_left_us: 20.0
+    recenter_overshoot_right_us: 200.0
+    recenter_overshoot_s: 0.25
     recenter_min_deflection_us: 50.0   # turns smaller than this (from center) do not kick
 
     # ---- ESC (PLACEHOLDERS)
