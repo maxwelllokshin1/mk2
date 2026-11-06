@@ -6,7 +6,7 @@ The expression comes from expression_node on /expression (latched). How each fac
 EVERY face, then iris / eyelid / loops / blink) is described in expressions.py and eye_plan().
 
     /expression          String   which face to show
-    /expression_closing  String   the face is about to end: eyelid faces (angry, bored) play the lid backwards
+    /expression_closing  String   the face is about to end: the eyelid face (angry) plays the lid backwards
     /person              PointStamped  iris follows the person (faces that track), within what the lid leaves open
     /oled/layer_xy       geometry_msgs/Point   move the iris yourself (display pixels)
 
@@ -41,10 +41,8 @@ class OledDisplay(Node):
         d('blink_every_s', 10.0)                             # blinking expressions blink this often (0 = never)
         d('iris_size', [44, 44])                             # iris.png is resized to this
         d('move_limits', [30, 98, 16, 48])                   # x_min, x_max, y_min, y_max of the iris center
-        d('lid_move_limits', [20, 108, 10, 60])             # eyelid faces (angry, bored): the iris may go lower / wider, but only where the lid leaves it visible
+        d('lid_move_limits', [20, 108, 10, 60])             # the eyelid face (angry): the iris may go lower / wider, but only where the lid leaves it visible
         d('lid_overlap_px', 20)                              # ... this many iris pixels may touch the lid
-        d('wander_min_s', 1.0)                               # bored: look somewhere else every 1-3 s
-        d('wander_max_s', 3.0)
         d('variant_min_s', 1.5)                              # excited: flips between its two looks every 1.5-4 s
         d('variant_max_s', 4.0)
         d('mirror_screen', 2)                                # which screen gets the mirrored eyelid (1 or 2)
@@ -87,9 +85,8 @@ class OledDisplay(Node):
         self.preview = p('preview_path')
         self.last_preview = 0.0
         self.last_open_try = 0.0
-        self.wander_range = (float(p('wander_min_s')), float(p('wander_max_s')))
         self.variant_range = (float(p('variant_min_s')), float(p('variant_max_s')))
-        self.next_wander = self.next_variant = 0.0
+        self.next_variant = 0.0
         self.expression = None
         self._set_expression(str(p('start_expression')))
 
@@ -168,7 +165,6 @@ class OledDisplay(Node):
         self.look = look_mode(name)
         self.look_i = random.randrange(len(self.face.looks))
         self.next_variant = now + random.uniform(*self.variant_range)
-        self.next_wander = now
         self.target = self.face.rest
         self.t0, self.closing_t = now, None
         self.last_bytes = None
@@ -221,13 +217,7 @@ class OledDisplay(Node):
 
     def _render(self):
         now = time.monotonic()
-        if self.look == 'wander':
-            if now >= self.next_wander:
-                x_min, x_max, y_min, y_max = self.limits
-                self.target = random.choice(self.face.allowed) if self.face.allowed else (
-                    random.uniform(x_min, x_max), random.uniform(y_min, y_max))
-                self.next_wander = now + random.uniform(*self.wander_range)
-        elif self.look == 'none':
+        if self.look == 'none':
             self.target = self.face.rest
         elif self.track and self.last_person is not None and now - self.last_person > self.lost_timeout:
             self.target = self.face.rest

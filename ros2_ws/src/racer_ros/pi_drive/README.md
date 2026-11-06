@@ -70,9 +70,11 @@ USB webcam -> person_detector (YOLOv8 ONNX, OpenCV) --/person (x,y 0..1)--> oled
 ```
 - **`oled_display`** shows the current expression (`/expression`, chosen by `expression_node`) on both screens.
   The eyeball (`config/expressions/blinking/normal/eyes/base.png`) is under EVERY face; blinking faces
-  (normal, excited, sarcastic) blink with normal's `blink.gif` every `blink_every_s` = 10 s. Angry and bored add an
+  (normal, excited, sarcastic) blink with normal's `blink.gif` every `blink_every_s` = 10 s. Angry adds an
   eyelid gif that plays, holds its last frame, and plays backwards just before the face ends; screen 2 shows it mirrored.
-  The iris stays where the lid leaves it visible. Each expression folder has a README.txt with its file names.
+  Bored, surprised, dizzy and sleepy are plain gifs on top of the eyeball. Every expression says ONE random voice line at a
+  random moment within its first `say_window_s` = 6 s (dizzy / surprised / excited speak at once); bored lasts as long as its gif and its line.
+  On angry the iris stays where the lid leaves it visible. Each expression folder has a README.txt with its file names.
 - **`expression_node`** picks the face and speaks (the `.mp3` / `.m4a` files in that face's `voice/` folder), both at random times.
   Parked: normal / surprised / angry / sarcastic / excited / sleepy / bored. Driving: normal / angry / sarcastic.
   SURPRISED also when the LiDAR sees a wall coming (`hazard_node`), DIZZY only on a collision, EXCITED also on a lap

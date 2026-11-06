@@ -10,9 +10,9 @@ Every expression lives in its own folder, with its eyes and its voice lines toge
 Every face is built bottom -> top from these pictures (see eye_plan):
     eyeball   normal/eyes/base.png                       under EVERY expression
     iris      normal/eyes/iris.png                       the part that looks around (follows a person / wanders)
-    lid       angry/eyes/eyelid.gif, bored/eyes/bored.gif   plays once, HOLDS its last frame, and plays backwards
+    lid       angry/eyes/eyelid.gif                      plays once, HOLDS its last frame, and plays backwards
                                                          just before the expression ends. Flipped on screen 2.
-    loop      dizzy/eyes/dizzy.gif, sleepy/eyes/sleepy.gif   loops
+    loop      dizzy, sleepy, surprised, bored (.gif)     plain gifs that just play (and loop) on top of the eyeball
     variants  excited/eyes/excited.gif + excited_2.png   he flips between them at random times
     blink     normal/eyes/blink.gif                      on top of every blinking expression (normal, excited, sarcastic)
 A file of the same name inside an expression's own folder (base.png, iris.png, blink.gif) overrides the one from normal.
@@ -24,7 +24,9 @@ When each expression can show up:
     dizzy (forced)        collision                      (hazard_node, /collision)
     excited (forced)      lap completed, the car stops after excited_after_drive_s of driving, or the excite button
 
-Nothing is scheduled ahead: the expression and the speaking each run on their own random timers.
+Nothing is scheduled ahead: the expression changes after a random time, and every expression says ONE random voice
+line at a random moment within its first say_window_s seconds (dizzy / surprised / excited speak at once).
+An expression never changes while a line is playing. bored lasts as long as its gif and its line (whichever is longer).
 """
 import os
 import random
@@ -33,19 +35,20 @@ from dataclasses import dataclass, fields
 @dataclass(frozen=True)
 class Spec:
     blinks: bool                 # blinks every blink_every_s (also decides the folder: blinking/ or static/)
-    look: str                    # iris: 'track' = follows people, 'wander' = looks around, 'none' = no iris
+    look: str                    # iris: 'track' = follows people, 'none' = no iris
     iris: bool = True            # draws the normal iris
     lid: str = ''                # eyelid gif in its own folder: holds the last frame, reverses at the end
     loop: tuple = ()             # gifs that just loop on top of the eyeball
     variants: tuple = ()         # looks he flips between at random times
+    once: bool = False           # lasts as long as its gif (and its voice line) instead of a random hold time
 
 
 EXPRESSIONS = {
     'normal':    Spec(True,  'track'),
     'sarcastic': Spec(True,  'track'),
-    'surprised': Spec(False, 'track'),
+    'surprised': Spec(False, 'none', iris=False, loop=('surprised',)),
     'angry':     Spec(False, 'track', lid='eyelid'),
-    'bored':     Spec(False, 'wander', lid='bored'),
+    'bored':     Spec(False, 'none', iris=False, loop=('bored',), once=True),
     'dizzy':     Spec(False, 'none', iris=False, loop=('dizzy',)),
     'sleepy':    Spec(False, 'none', iris=False, loop=('sleepy',)),
     'excited':   Spec(True,  'none', iris=False, variants=('excited', 'excited_2')),
@@ -131,14 +134,9 @@ class Timing:
     """All times in seconds. Every one is a node parameter (float)."""
     expr_hold_min_s: float = 8.0         # an expression stays this long at least ...
     expr_hold_max_s: float = 25.0        # ... and at most this long, then a new random one is picked
-    say_gap_drive_min_s: float = 6.0     # pause between voice lines while driving
-    say_gap_drive_max_s: float = 18.0
-    say_gap_person_min_s: float = 8.0    # parked, a person in view: talks more often
-    say_gap_person_max_s: float = 20.0
-    say_gap_alone_min_s: float = 25.0    # parked, nobody around
-    say_gap_alone_max_s: float = 60.0
-    greet_min_s: float = 1.0             # a person shows up while parked: first line after this long ...
-    greet_max_s: float = 3.0             # ... (only if the next line was due later than that)
+    expr_hold_person_min_s: float = 8.0  # parked with a person in view: faces change sooner, so he talks more often
+    expr_hold_person_max_s: float = 14.0
+    say_window_s: float = 6.0            # each expression says ONE line, at a random moment within this long of showing up
     excited_min_s: float = 8.0           # how long excited stays
     excited_max_s: float = 12.0
     excited_after_drive_s: float = 60.0  # stopping after at least this much driving = excited
@@ -156,23 +154,23 @@ class Director:
         ('expression', name)             show this expression now
         ('closing', name)                lid expressions: start playing the lid backwards, the next face follows
         ('say', name, interrupt)         speak one random line of this expression (interrupt = cut the current line)
+    lengths = {name: seconds}: how long the 'once' expressions' gifs run (bored lasts exactly that, or until its line ends).
     """
 
-    def __init__(self, timing=None, rng=None):
+    def __init__(self, timing=None, rng=None, lengths=None):
         self.t = timing or Timing()
         self.rng = rng or random.Random()
+        self.lengths = dict(lengths or {})
+        self.say_at = None                  # when this expression's one line starts (None = nothing waiting)
         self.expression = None
         self.expr_until = 0.0
         self.closing_until = 0.0
         self.forced_name = None
         self.forced_until = 0.0
         self.last_forced = {}
-        self.next_say = 0.0
         self.ctx = None
         self.was_driving = False
         self.drive_start = 0.0
-        self.was_speaking = False
-        self.was_person = False
         self.pending = []
 
     # ---- triggers (any time, from callbacks) ----
@@ -186,20 +184,17 @@ class Director:
         self.force(now, 'excited')
 
     # ---- helpers ----
-    def _gap(self, ctx, person):
-        t = self.t
-        if ctx == 'drive':
-            lo, hi = t.say_gap_drive_min_s, t.say_gap_drive_max_s
-        elif person:
-            lo, hi = t.say_gap_person_min_s, t.say_gap_person_max_s
-        else:
-            lo, hi = t.say_gap_alone_min_s, t.say_gap_alone_max_s
-        return self.rng.uniform(lo, hi)
-
-    def _pick(self, now, pool):
+    def _pick(self, now, pool, person):
         choices = [n for n in pool if n != self.expression] or list(pool)
         self.expression = self.rng.choice(choices)
-        self.expr_until = now + self.rng.uniform(self.t.expr_hold_min_s, self.t.expr_hold_max_s)
+        if EXPRESSIONS[self.expression].once and self.expression in self.lengths:
+            hold = self.lengths[self.expression]                    # its gif plays through once, then the next face
+        elif person:
+            hold = self.rng.uniform(self.t.expr_hold_person_min_s, self.t.expr_hold_person_max_s)
+        else:
+            hold = self.rng.uniform(self.t.expr_hold_min_s, self.t.expr_hold_max_s)
+        self.expr_until = now + hold
+        self.say_at = now + self.rng.uniform(0.0, self.t.say_window_s)      # its one line, somewhere in the first seconds
         return ('expression', self.expression)
 
     def _apply_forced(self, now, person):
@@ -212,7 +207,7 @@ class Director:
         self.forced_name, self.expression = best, best
         self.forced_until = self.expr_until = now + self.rng.uniform(getattr(self.t, lo), getattr(self.t, hi))
         self.closing_until = 0.0
-        self.next_say = self.forced_until + self._gap(self.ctx or 'idle', person)
+        self.say_at = None                                          # a reaction: its line goes out right now
         return [('expression', best), ('say', best, True)]
 
     def step(self, now, driving, person, speaking):
@@ -228,7 +223,6 @@ class Director:
         if self.pending:
             ev = self._apply_forced(now, person)
             if ev:
-                self.was_speaking, self.was_person = speaking, person
                 return ev
         forced_now = now < self.forced_until
         if self.forced_name and not forced_now:
@@ -239,33 +233,27 @@ class Director:
         ctx_changed = ctx != self.ctx
         self.ctx = ctx
 
-        # the expression: random hold times, never swapped while a line is playing
+        # the expression: random hold times, never swapped while a line is playing or still waiting to start
         if not forced_now:
             if self.closing_until and (ctx_changed or self.expression not in pool):
                 self.closing_until = 0.0                            # context changed under it: no time to reverse
             if self.closing_until:
                 if now >= self.closing_until:
                     self.closing_until = 0.0
-                    ev.append(self._pick(now, pool))
+                    ev.append(self._pick(now, pool, person))
             elif not speaking:
                 if self.expression is None or ctx_changed or self.expression not in pool:
-                    ev.append(self._pick(now, pool))
-                elif now >= self.expr_until:
+                    ev.append(self._pick(now, pool, person))
+                elif now >= self.expr_until and self.say_at is None:
                     if self.expression in CLOSING:                  # lid goes back up first, then the next face
                         self.closing_until = now + self.t.close_s
                         ev.append(('closing', self.expression))
                     else:
-                        ev.append(self._pick(now, pool))
+                        ev.append(self._pick(now, pool, person))
 
-        # the voice
-        if self.was_speaking and not speaking:
-            self.next_say = now + self._gap(ctx, person)            # always a pause after a line
-        if ctx_changed:
-            self.next_say = now + self._gap(ctx, person)
-        if ctx == 'idle' and person and not self.was_person:
-            self.next_say = min(self.next_say, now + self.rng.uniform(self.t.greet_min_s, self.t.greet_max_s))
-        if self.expression is not None and not speaking and not self.closing_until and now >= self.next_say:
+        # the voice: one line per expression, at its random moment
+        if (self.say_at is not None and self.expression is not None and not speaking
+                and not self.closing_until and now >= self.say_at):
             ev.append(('say', self.expression, False))
-            self.next_say = now + self._gap(ctx, person)            # replaced by the gap after the line ends
-        self.was_speaking, self.was_person = speaking, person
+            self.say_at = None
         return ev

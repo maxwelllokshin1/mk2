@@ -108,8 +108,6 @@ oled_display:
     lid_move_limits: [20, 108, 10, 60]   # angry / bored: wider + lower, but only where the eyelid leaves the iris visible
     lid_overlap_px: 20          # iris pixels allowed to touch the lid
     mirror_screen: 2            # which screen shows the eyelid mirrored (1 or 2); swap if the lids slant the wrong way
-    wander_min_s: 1.0           # bored: the iris looks somewhere new every 1-3 s
-    wander_max_s: 3.0
     variant_min_s: 1.5          # excited: flips between its star and ^-^ eyes every 1.5-4 s
     variant_max_s: 4.0
     render_hz: 15.0
@@ -143,16 +141,11 @@ expression:
     drive_throttle_min: 0.05    # |throttle| above this = driving
     drive_hold_s: 3.0           # still "driving" this long after the throttle drops
     person_hold_s: 3.0
-    expr_hold_min_s: 8.0        # a face stays 8-25 s, then a random new one
+    expr_hold_min_s: 8.0        # a face stays 8-25 s, then a random new one (bored lasts as long as its gif and line)
     expr_hold_max_s: 25.0
-    say_gap_drive_min_s: 6.0    # pause between voice lines while driving
-    say_gap_drive_max_s: 18.0
-    say_gap_person_min_s: 8.0   # parked with a person in view: talks more often
-    say_gap_person_max_s: 20.0
-    say_gap_alone_min_s: 25.0   # parked, nobody around
-    say_gap_alone_max_s: 60.0
-    greet_min_s: 1.0            # someone shows up while parked -> first line after 1-3 s
-    greet_max_s: 3.0
+    expr_hold_person_min_s: 8.0 # a person in view: faces change every 8-14 s, so he talks more often
+    expr_hold_person_max_s: 14.0
+    say_window_s: 6.0           # every face says ONE random line, at a random moment within its first 6 s
     excited_min_s: 8.0          # excited stays 8-12 s
     excited_max_s: 12.0
     excited_after_drive_s: 60.0 # stopping after driving this long = excited

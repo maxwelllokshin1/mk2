@@ -14,8 +14,8 @@ Output:
     /expression          String (latched)                   e.g. 'sleepy'
     /expression_closing  String                             eyelid faces: start playing the lid backwards
 
-Playback is one line at a time: .mp3 through mpg123, .m4a/.wav/.ogg/.flac/.aac through ffmpeg into aplay.
-Volume is a software scale, so 0.75 = 75 %.
+Playback is one line at a time. Every file goes through ffmpeg (loudness-normalised) into aplay; without ffmpeg,
+.mp3 plays through mpg123. Volume is a software scale, so 0.75 = 75 %.
 """
 import os
 import shutil
@@ -29,7 +29,21 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from ament_index_python.packages import get_package_share_directory
 from std_msgs.msg import Bool, Empty, Float32MultiArray, String
 
-from pi_drive.expressions import EXPRESSIONS, Director, ShuffleBag, Timing, find_voice_files
+from pi_drive.expressions import EXPRESSIONS, Director, ShuffleBag, Timing, eye_plan, find_voice_files
+
+
+def gif_seconds(path):
+    """How long a gif plays once through, or None (no PIL / unreadable)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            total = 0
+            for i in range(getattr(im, 'n_frames', 1)):
+                im.seek(i)
+                total += im.info.get('duration', 100)
+        return max(total, 100) / 1000.0
+    except Exception:
+        return None
 
 
 class ExpressionNode(Node):
@@ -38,7 +52,7 @@ class ExpressionNode(Node):
         d = self.declare_parameter
         d('expressions_dir', '')                    # '' = the package config/expressions folder
         d('volume', 0.75)                           # 0..1
-        d('normalize', True)                        # .m4a/.wav/...: loudness-normalise quiet recordings (ffmpeg loudnorm)
+        d('normalize', True)                        # loudness-normalise every line (ffmpeg loudnorm) so quiet recordings are as loud as the rest
         d('audio_device', 'plughw:CARD=sndrpihifiberry')   # ALSA device of the I2S amps ('default' = system default)
         d('drive_throttle_min', 0.05)               # |throttle| above this counts as driving
         d('drive_hold_s', 3.0)                      # stay in "driving" this long after the throttle drops
@@ -54,15 +68,23 @@ class ExpressionNode(Node):
         self.thr_min = float(p('drive_throttle_min'))
         self.drive_hold = float(p('drive_hold_s'))
         self.person_hold = float(p('person_hold_s'))
-        self.director = Director(Timing(**{k: float(p(k)) for k in Timing.__dataclass_fields__}))
+        lengths = {}                                   # faces that last as long as their gif (bored)
+        for name, spec in EXPRESSIONS.items():
+            if spec.once:
+                seconds = gif_seconds(next(iter(eye_plan(self.root, name)['loop']), ''))
+                if seconds:
+                    lengths[name] = seconds
+        self.director = Director(Timing(**{k: float(p(k)) for k in Timing.__dataclass_fields__}), lengths=lengths)
         self.bags = {name: ShuffleBag() for name in EXPRESSIONS}
         self.proc = None
         self.last_drive = self.last_person = None
 
-        if shutil.which('mpg123') is None:
-            self.get_logger().error('mpg123 not found: no .mp3 will play (apt install mpg123)')
-        if shutil.which('ffmpeg') is None or shutil.which('aplay') is None:
-            self.get_logger().warn('ffmpeg/aplay not found: .m4a/.wav/.ogg lines will not play (apt install ffmpeg alsa-utils)')
+        self.have_ffmpeg = shutil.which('ffmpeg') is not None and shutil.which('aplay') is not None
+        if not self.have_ffmpeg:
+            self.get_logger().warn('ffmpeg/aplay not found: only .mp3 (mpg123, no loudness normalising) will play '
+                                   '(apt install ffmpeg alsa-utils)')
+        if shutil.which('mpg123') is None and not self.have_ffmpeg:
+            self.get_logger().error('no player found: no sound will play')
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
         self.expr_pub = self.create_publisher(String, '/expression', latched)
@@ -115,12 +137,12 @@ class ExpressionNode(Node):
             pass
 
     def _command(self, path):
-        if path.lower().endswith('.mp3'):
+        if path.lower().endswith('.mp3') and not (self.normalize and self.have_ffmpeg):
             cmd = ['mpg123', '-q', '-f', str(self.scale)]
             if self.device != 'default':
                 cmd += ['-a', self.device]
             return cmd + [path]
-        # anything else (.m4a ...): ffmpeg decodes and scales to a wav stream, aplay plays it
+        # ffmpeg decodes, evens out the loudness and scales to a wav stream, aplay plays it
         gain = f'volume={self.scale / 32768:.3f}'
         chain = f'loudnorm=I=-12:TP=-1:LRA=7,aresample=48000,{gain}' if self.normalize else gain
         return ['sh', '-c', 'ffmpeg -v quiet -i "$1" -filter:a "$2" -f wav - | aplay -q ${3:+-D "$3"} -',

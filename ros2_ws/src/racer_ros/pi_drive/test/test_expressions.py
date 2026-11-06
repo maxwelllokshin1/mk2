@@ -68,7 +68,7 @@ def test_dizzy_beats_surprised_but_not_the_other_way_round():
 
 
 def test_lid_faces_close_before_they_end():
-    assert set(CLOSING) == {'angry', 'bored'}
+    assert set(CLOSING) == {'angry'}
     d = Director(rng=random.Random(6))
     ev, _ = run(d, 4000)
     kinds = [e for _, e in ev if e[0] in ('expression', 'closing')]
@@ -187,3 +187,67 @@ def test_voice_files_accept_m4a_and_mp3(tmp_path):
     for f in ('a.mp3', 'b.M4A', 'c.wav', 'README.txt', 'd.png'):
         (voice / f).write_bytes(b'x')
     assert [os.path.basename(f) for f in find_voice_files(str(tmp_path), 'angry')] == ['a.mp3', 'b.M4A', 'c.wav']
+
+
+def drive_director(director, seconds, line_s=3.0, driving=False, person=False, start=0.0, dt=0.1):
+    """Like run(), but returns [(t, event)] and lets every line last line_s seconds."""
+    events, t, speak_until = [], start, -1.0
+    while t < start + seconds:
+        for e in director.step(t, driving, person, t < speak_until):
+            events.append((t, e))
+            if e[0] == 'say':
+                speak_until = t + line_s
+        t += dt
+    return events
+
+
+def test_every_expression_says_one_line_within_its_first_six_seconds():
+    d = Director(rng=random.Random(11))
+    ev = drive_director(d, 4000)
+    shown = [(t, e[1]) for t, e in ev if e[0] == 'expression']
+    says = [(t, e[1]) for t, e in ev if e[0] == 'say']
+    assert len(shown) > 50
+    for (t0, name), nxt in zip(shown, shown[1:] + [(1e9, None)]):
+        lines = [t for t, who in says if t0 <= t < nxt[0] and who == name]
+        assert len(lines) == 1, (name, t0, lines)               # exactly one line per expression
+        assert lines[0] - t0 <= d.t.say_window_s + 0.2          # ... within the first six seconds
+
+
+def test_the_moment_of_the_line_is_random():
+    delays = set()
+    for seed in range(20):
+        ev = drive_director(Director(rng=random.Random(seed)), 60)
+        first = next(t for t, e in ev if e[0] == 'expression')
+        say = next(t for t, e in ev if e[0] == 'say')
+        delays.add(round(say - first, 1))
+    assert len(delays) > 10
+
+
+def test_forced_faces_speak_at_once():
+    d = Director(rng=random.Random(12))
+    drive_director(d, 20)
+    d.force(100.0, 'surprised')
+    ev = d.step(100.0, False, False, False)
+    assert ev == [('expression', 'surprised'), ('say', 'surprised', True)]
+
+
+def test_bored_lasts_as_long_as_its_gif_and_its_line():
+    for line_s in (2.0, 14.0):                                  # a short line, and one longer than the gif
+        d = Director(Timing(), rng=random.Random(13), lengths={'bored': 6.2})
+        ev = drive_director(d, 8000, line_s=line_s)
+        seen = 0
+        for (t0, e), (t1, nxt) in zip(ev, ev[1:]):
+            if e == ('expression', 'bored'):
+                seen += 1
+                start = t0
+                end = next(t for t, x in ev if x[0] == 'expression' and t > start)
+                say = next(t for t, x in ev if x == ('say', 'bored', False) and t >= start)
+                assert end - start >= 6.2 - 0.1                     # the gif plays through
+                assert end >= say + line_s - 0.15                   # the line is never cut off
+                assert end - start <= max(6.2, say - start + line_s) + 0.5     # and the next face follows right after
+        assert seen > 3
+
+
+def test_bored_and_surprised_are_plain_gifs():
+    assert EXPRESSIONS['bored'].loop == ('bored',) and EXPRESSIONS['bored'].once and not EXPRESSIONS['bored'].lid
+    assert EXPRESSIONS['surprised'].loop == ('surprised',) and not EXPRESSIONS['surprised'].lid
