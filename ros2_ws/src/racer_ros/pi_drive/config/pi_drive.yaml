@@ -131,7 +131,7 @@ oled_display:
 # (config/expressions/*/<name>/voice/). MAX98357 I2S amps. Rules: pi_drive/expressions.py
 #   parked:   normal, surprised, angry, sarcastic, excited, sleepy, bored     driving:  normal, angry, sarcastic
 #   surprised: about to hit a wall (hazard)    dizzy: collision (hazard)
-#   excited:  lap completed, stopped after a long drive, or the lap or a long drive (joycon_teleop excite_button)
+#   excited:  lap completed, or stopped after a long drive
 # =====================================================================================
 expression:
   ros__parameters:
