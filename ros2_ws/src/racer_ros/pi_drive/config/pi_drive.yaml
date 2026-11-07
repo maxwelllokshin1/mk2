@@ -67,7 +67,7 @@ joycon_teleop:
     steer_rate_gain: 0.8        # lower = softer everywhere, higher = follows the stick more eagerly. 0.0 = off
     steer_vel_hold_s: 0.25      # a flick keeps its fast rate this long so the wheels finish the move
 
-    # ---- autonomy (hold R). Steering AND speed follow reactive_node; throttle is its speed
+    # ---- autonomy (only while the autonomy button is held; let go = RC at once). Steering AND speed follow reactive_node; throttle is its speed
     # scaled so that auto_speed_ref_mps -> auto_max_throttle. auto_max_throttle is your speed
     # ceiling: raise it step by step as the car does well. Keep auto_speed_ref_mps equal to
     # follow_the_gap gap_params speed_max (0.0 = ignore its speed, use fixed auto_throttle).
@@ -92,8 +92,7 @@ joycon_teleop:
     button_side: left
     a_button: BTN_DPAD_DOWN  # forward while held
     b_button: BTN_DPAD_LEFT  # reverse while held
-    autonomy_button: BTN_TR2 # hold it autonomy_toggle_hold_s to switch RC <-> AUTONOMOUS (it is no longer a deadman switch)
-    autonomy_toggle_hold_s: 3.0
+    autonomy_button: BTN_TR2 # AUTONOMY while held, RC the moment you let go (deadman switch)
 
 # =====================================================================================
 # OLED eyes (128x64 I2C, SSD1306). The picture comes from the current expression:
