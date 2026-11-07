@@ -6,7 +6,7 @@ reactive_node:
 
     max_lidar_range: 3.5 # how far i allow the car to "see"
 
-    speed_max: 8.0
+    speed_max: 15.0
 
     steering_gain: 0.65 # 0.38 # how hard the car turns toward target (up -> sharper turn | down -> slower turn)
 
