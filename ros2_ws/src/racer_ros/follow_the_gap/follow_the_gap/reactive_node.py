@@ -23,6 +23,7 @@ class ReactiveFollowGap(Node):
         self.declare_parameter('max_lidar_range', 3.0) # meters
         self.declare_parameter('speed_max', 2.0)
         self.declare_parameter('steering_gain', 1.0) # proportional gain
+        self.declare_parameter('max_steer_rate_deg', 12.0) # most the steering may change per LiDAR scan (it was fixed at 4)
         self.declare_parameter('max_steering', 30.0) # proportional gain
 
         # ////// steering low-pass (dynamic alpha) \\\\\\\\\
@@ -60,6 +61,7 @@ class ReactiveFollowGap(Node):
         self.steering_gain = self.get_parameter('steering_gain').value
         self.current_speed = 0.0
         self.max_steering = np.deg2rad(self.get_parameter('max_steering').value)
+        self.max_steer_rate = np.deg2rad(self.get_parameter('max_steer_rate_deg').value)
         self.alpha_straight = self.get_parameter('alpha_straight').value
         self.alpha_curve = self.get_parameter('alpha_curve').value
         self.fov = np.deg2rad(self.get_parameter('fov_deg').value) # how much we want the car to see infront of it
@@ -206,8 +208,9 @@ class ReactiveFollowGap(Node):
     def on_parameter_update(self, params): # keeps the attributes read every scan in sync with the dashboard tuner
         for p in params:
             name, value = p.name, p.value
-            if name in ('max_steering', 'straight_max_angle_deg', 'fov_deg'):
-                attr = {'max_steering': 'max_steering', 'straight_max_angle_deg': 'straight_max_angle', 'fov_deg': 'fov'}[name]
+            if name in ('max_steering', 'straight_max_angle_deg', 'fov_deg', 'max_steer_rate_deg'):
+                attr = {'max_steering': 'max_steering', 'straight_max_angle_deg': 'straight_max_angle', 'fov_deg': 'fov',
+                        'max_steer_rate_deg': 'max_steer_rate'}[name]
                 setattr(self, attr, np.deg2rad(value))           # stored in radians
             elif name in self.TUNABLE:
                 setattr(self, name, value)
@@ -399,7 +402,7 @@ class ReactiveFollowGap(Node):
         steering_delta = steering_angle - old_steering
 
         # steering rate limiter ...
-        max_steer_rate = np.deg2rad(4.0)  # per lidar update
+        max_steer_rate = self.max_steer_rate  # per lidar update
 
         delta = steering_angle - self.prev_steering
 

@@ -129,6 +129,10 @@ TUNABLE_PARAMS = {
         'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Smoothing in curves (0 to 1)', 'default': 0.6,
         'desc': 'Steering smoothing when turning sharply. Higher = smoother but slower to react. Lower = reacts fast, jumpier.',
     },
+    'max_steer_rate_deg': {
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Fastest steering change (deg per scan)', 'default': 12.0,
+        'desc': 'How far the wheels may turn between two LiDAR scans. Higher = turns in faster. Lower = smoother but slower to react.',
+    },
     'fov_deg': {
         'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'View width (deg each side)', 'default': 70.0,
         'desc': 'How far to each side it looks. Higher = sees further around bends but may turn early.',

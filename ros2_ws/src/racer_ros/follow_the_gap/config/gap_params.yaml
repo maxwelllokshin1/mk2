@@ -13,6 +13,7 @@ reactive_node:
     alpha_straight: 0.6 # dynamic on straights (up -> stable, ignore wobble | down -> twitchier)
     alpha_curve: 0.35 # 0.60 # dynamic on curves (up -> smoother but slower on turns | down -> reacts instantly)
 
+    max_steer_rate_deg: 12.0 # most the steering may change per LiDAR scan (was fixed at 4 in the code: too slow into a turn)
     fov_deg: 70.0
     gap_aim_aggressiveness: 0.5
 
