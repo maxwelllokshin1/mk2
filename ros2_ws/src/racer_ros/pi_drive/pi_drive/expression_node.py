@@ -93,6 +93,8 @@ class ExpressionNode(Node):
         self.create_subscription(Bool, '/person_detected', self._on_person, 10)
         self.create_subscription(Empty, '/lap_completed', lambda _m: self._excite('lap'), 10)
         self.create_subscription(Empty, '/excite', lambda _m: self._excite('button'), 10)
+        self.muted_pub = self.create_publisher(Bool, '/muted', latched)
+        self.muted_pub.publish(Bool(data=False))
         self.create_subscription(Empty, '/mute', lambda _m: self._toggle_mute(), 10)
         self.create_subscription(Empty, '/surprise', lambda _m: self._force('surprised'), 10)
         self.create_subscription(Empty, '/collision', lambda _m: self._force('dizzy'), 10)
@@ -113,6 +115,7 @@ class ExpressionNode(Node):
         self.muted = not self.muted
         if self.muted:
             self._stop()                                  # cut the line that is playing
+        self.muted_pub.publish(Bool(data=self.muted))
         self.get_logger().info('speaker MUTED' if self.muted else 'speaker unmuted')
 
     def _excite(self, why):

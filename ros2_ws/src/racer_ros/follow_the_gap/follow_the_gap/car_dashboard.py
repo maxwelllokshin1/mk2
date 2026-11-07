@@ -5,7 +5,7 @@ Car dashboard: a small web page (port 8080) that shows what the car is doing, in
 Shows   controller / LiDAR / camera connected, mode, speed, steering angle, wall-ahead and reversing warnings,
         the LiDAR picture, the camera picture, and a Tuning tab that changes parameters while the car runs.
 Reads   /drive_mode (joycon_teleop), /drive_cmd (what the car is told to do), /ego_racecar/odom (speed estimate),
-        /scan (LiDAR), /camera/image/jpeg (person_detector), /mode_toggle_progress
+        /scan (LiDAR), /camera/image/jpeg (person_detector), /mode_toggle_progress, /muted (expression_node)
 Tunes   reactive_node, joycon_teleop and gpio_driver through their normal ROS parameter services.
 """
 import json
@@ -19,8 +19,8 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from std_msgs.msg import Float32, Float32MultiArray, String
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from std_msgs.msg import Bool, Float32, Float32MultiArray, String
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import CompressedImage, LaserScan
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
@@ -195,7 +195,7 @@ class DashboardState:
             'controller': False, 'drive_mode': 'NO_TELEOP', 'toggle_progress': 0.0,
             'lidar_ok': False, 'scan': [], 'front_cm': -1,
             'speed': 0.0, 'steering_deg': 0.0, 'throttle': 0.0, 'reversing': False,
-            'camera_age': -1.0, 't': 0.0,
+            'camera_age': -1.0, 'muted': False, 't': 0.0,
         }
 
     def update(self, partial):
@@ -388,6 +388,8 @@ class CarDashboard(Node):
         self.front_offset = math.radians(float(self.get_parameter('lidar_front_offset_deg').value))
 
         self.create_subscription(String, '/drive_mode', self._on_mode, 10)
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
+        self.create_subscription(Bool, '/muted', self._on_muted, latched)       # from expression_node
         self.create_subscription(Float32, '/mode_toggle_progress', self._on_progress, 10)
         self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
         self.create_subscription(Odometry, '/ego_racecar/odom', self._on_odom, 10)
@@ -397,6 +399,7 @@ class CarDashboard(Node):
         self._mode, self._mode_t = 'NO_TELEOP', 0.0
         self._progress = 0.0
         self._steer, self._throttle, self._cmd_t = 0.0, 0.0, 0.0
+        self._muted = False
         self._speed, self._odom_t = 0.0, 0.0
         self._scan_t, self._scan_proc_t = 0.0, 0.0
         self._bins, self._front_cm = [], -1
@@ -414,6 +417,9 @@ class CarDashboard(Node):
     # ---------------- ROS callbacks: only remember the latest value ----------------
     def _on_mode(self, msg):
         self._mode, self._mode_t = msg.data, time.time()
+
+    def _on_muted(self, msg):
+        self._muted = bool(msg.data)
 
     def _on_progress(self, msg):
         self._progress = float(msg.data)
@@ -474,6 +480,7 @@ class CarDashboard(Node):
             'throttle': round(throttle, 2),
             'reversing': speed < -0.05 or throttle < -0.01,
             'camera_age': cam_age,
+            'muted': self._muted,
             't': now,
         })
 

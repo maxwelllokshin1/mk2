@@ -98,6 +98,7 @@ button.plain:hover{border-color:#fff;}
     <span class="pill bad" id="pCtrl"><i></i><span>Controller</span></span>
     <span class="pill bad" id="pLidar"><i></i><span>LiDAR</span></span>
     <span class="pill bad" id="pCam"><i></i><span>Camera</span></span>
+    <span class="pill" id="pSound"><i></i><span>Sound on</span></span>
   </div>
   <div class="mode">
     <span class="mode-text wait" id="modeText">—</span>
@@ -184,6 +185,7 @@ function render(d) {
   pill($('pCtrl'), d.controller, 'Controller connected', d.drive_mode === 'NO_TELEOP' ? 'Controller software off' : 'Controller not connected');
   pill($('pLidar'), d.lidar_ok, 'LiDAR connected', 'LiDAR not connected');
   pill($('pCam'), camOk, 'Camera connected', 'Camera not connected');
+  pill($('pSound'), !d.muted, 'Sound on', 'Muted');
 
   const m = MODES[d.drive_mode] || { text: d.drive_mode, big: d.drive_mode, help: '', cls: 'wait' };
   $('modeText').textContent = m.text;
