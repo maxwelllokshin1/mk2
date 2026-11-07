@@ -19,6 +19,7 @@ class ReactiveFollowGap(Node):
         
         # /////////// declaring the params \\\\\\\\\\
         self.declare_parameter('bubble_radius', 0.3) # in meters
+        self.declare_parameter('bubble_max_deg', 30.0) # the bubble never blocks more than this many degrees EACH side of the closest point
         self.declare_parameter('preprocess_conv_size', 3) # the window to average values
         self.declare_parameter('max_lidar_range', 3.0) # meters
         self.declare_parameter('speed_max', 2.0)
@@ -55,6 +56,7 @@ class ReactiveFollowGap(Node):
 
         # ////////// get parameters \\\\\\\\\
         self.bubble_radius = self.get_parameter('bubble_radius').value
+        self.bubble_max = np.deg2rad(self.get_parameter('bubble_max_deg').value)
         self.preprocess_conv_size = self.get_parameter('preprocess_conv_size').value
         self.max_lidar_range = self.get_parameter('max_lidar_range').value
         self.speed_max = self.get_parameter('speed_max').value
@@ -208,9 +210,9 @@ class ReactiveFollowGap(Node):
     def on_parameter_update(self, params): # keeps the attributes read every scan in sync with the dashboard tuner
         for p in params:
             name, value = p.name, p.value
-            if name in ('max_steering', 'straight_max_angle_deg', 'fov_deg', 'max_steer_rate_deg'):
+            if name in ('max_steering', 'straight_max_angle_deg', 'fov_deg', 'max_steer_rate_deg', 'bubble_max_deg'):
                 attr = {'max_steering': 'max_steering', 'straight_max_angle_deg': 'straight_max_angle', 'fov_deg': 'fov',
-                        'max_steer_rate_deg': 'max_steer_rate'}[name]
+                        'max_steer_rate_deg': 'max_steer_rate', 'bubble_max_deg': 'bubble_max'}[name]
                 setattr(self, attr, np.deg2rad(value))           # stored in radians
             elif name in self.TUNABLE:
                 setattr(self, name, value)
@@ -306,6 +308,8 @@ class ReactiveFollowGap(Node):
         
         # then set the index to 0 
         copied_ranges[bubble_indices] = 0.0 # this is to set all values within the bubble to 0. MAKE THEM KNOWN THEY ARE CLOSE AND UNSAFE
+        if not np.any(copied_ranges > 0):
+            copied_ranges = processed_ranges.copy() # nothing left at all: pick the best of what is there rather than aim straight ahead
         # this way when follow the gap procedure is done, everything is excluded within the bubble
         
 
@@ -533,6 +537,9 @@ class ReactiveFollowGap(Node):
         #calc the angle opposite by bubble
         bubble_angle = dynamic_radius / max(smallest_dist,0.5) # prevents bubble from blowing up to infinity when somehting is next to you
         # number of indices 
+        # a wall right in front used to give a bubble wider than the whole view: every beam was blocked, there was no gap,
+        # and the car aimed straight ahead = straight into the wall. Cap it so there is always room on both sides.
+        bubble_angle = min(bubble_angle, self.bubble_max)
         bubble_index_range = int(np.ceil(bubble_angle / data.angle_increment)) # get how many lidar beams that angle covers
         start_index = max(0, smallest_index - bubble_index_range)
         end_index = min(array_length - 1, smallest_index + bubble_index_range)

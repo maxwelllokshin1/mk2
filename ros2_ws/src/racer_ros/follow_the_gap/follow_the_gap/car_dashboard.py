@@ -101,6 +101,10 @@ TUNABLE_PARAMS = {
         'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Bubble radius (m)', 'default': 0.3,
         'desc': "Safety zone around the closest obstacle. The car won't aim through it. Higher = wider berth. Lower = cuts closer.",
     },
+    'bubble_max_deg': {
+        'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'double', 'label': 'Bubble widest angle (deg each side)', 'default': 30.0,
+        'desc': 'The most the safety bubble may block either side of the closest point. Without a limit a close wall blocks the whole view and the car drives straight at it. Lower = more room to turn.',
+    },
     'preprocess_conv_size': {
         'node': 'reactive_node', 'group': 'Autonomous driving', 'type': 'int', 'label': 'Smoothing window (readings)', 'default': 3,
         'desc': 'How many LiDAR readings get averaged together to smooth out noise. Higher = smoother but blurs small gaps.',

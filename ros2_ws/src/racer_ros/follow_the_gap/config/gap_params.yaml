@@ -2,6 +2,8 @@ reactive_node:
   ros__parameters:
     bubble_radius: 0.3 # safety zone drawn around closest obstacle lidar sees, car treats as blocked off
 
+    bubble_max_deg: 30.0 # the bubble never blocks more than this many degrees each side of the closest point (a close wall used to block the whole view -> no gap -> aimed straight ahead)
+
     preprocess_conv_size: 3 # fixed the code typo that made this a no-op (was "preporcess_conv_size") — now it actually sets the lidar smoothing window size
 
     max_lidar_range: 3.5 # how far i allow the car to "see"
