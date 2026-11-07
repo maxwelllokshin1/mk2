@@ -6,12 +6,12 @@ reactive_node:
 
     max_lidar_range: 3.5 # how far i allow the car to "see"
 
-    speed_max: 15.0
+    speed_max: 8.0
 
-    steering_gain: 0.38 # how hard the car turns toward target (up -> sharper turn | down -> slower turn)
+    steering_gain: 0.65 # 0.38 # how hard the car turns toward target (up -> sharper turn | down -> slower turn)
 
     alpha_straight: 0.6 # dynamic on straights (up -> stable, ignore wobble | down -> twitchier)
-    alpha_curve: 0.60 # dynamic on curves (up -> smoother but slower on turns | down -> reacts instantly)
+    alpha_curve: 0.35 # 0.60 # dynamic on curves (up -> smoother but slower on turns | down -> reacts instantly)
 
     fov_deg: 70.0
     gap_aim_aggressiveness: 0.5
