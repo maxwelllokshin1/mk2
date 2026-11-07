@@ -45,4 +45,11 @@ reactive_node:
     reference_corridor_m: 2.0     # corridor width (m) the values above were tuned for — measure your usual test track
     min_track_scale: 0.4          # floor: how much a tiny track can shrink everything
     max_track_scale: 1.8          # ceiling: how much a huge track can grow everything — lower this before a real (non-sim) speed_max test, see mcu_bridge's own hard speed clamp too
-    track_scale_ema_alpha: 0.05   # smoothing on the estimate — higher adapts faster but jitters more
+    track_scale_ema_alpha: 0.3    # smoothing of the measured left / right wall distances (1.0 = raw every scan, lower = steadier but slower)
+
+    # walls, measured sideways on every scan (see track_geometry.py); bubble / range / fov / speed above scale with them
+    center_gain: 0.3              # steers toward the middle of the track. 0 = off, 1 = full lock at a wall
+    side_danger_m: 0.25           # a wall closer than this pushes the car away at full lock (reference track, scales with it)
+    front_stop_m: 0.35            # wall straight ahead closer than this: crawl speed only
+    front_slow_m: 1.5             # wall ahead closer than this: slows down linearly
+    crawl_speed_frac: 0.1         # crawl speed = this x speed_max
