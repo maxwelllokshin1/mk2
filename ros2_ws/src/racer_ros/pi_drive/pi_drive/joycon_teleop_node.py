@@ -177,7 +177,7 @@ class JoyconTeleop(Node):
         self.declare_parameter('a_button', 'BTN_EAST')
         self.declare_parameter('b_button', 'BTN_SOUTH')
         self.declare_parameter('autonomy_button', 'BTN_TR')
-        self.declare_parameter('excite_button', 'BTN_DPAD_UP')  # makes the car EXCITED (eyes + voice); '' = off
+        self.declare_parameter('mute_button', 'BTN_DPAD_UP')    # toggles the speaker mute; '' = off
 
         self.mixer = Mixer(MixerConfig(**{k: float(self.get_parameter(k).value) for k in cfg.__dict__}))
         self.left_names = [s.lower() for s in self.get_parameter('left_name_contains').value]
@@ -202,7 +202,7 @@ class JoyconTeleop(Node):
         self.toggle_hold_s = float(self.get_parameter('autonomy_toggle_hold_s').value)
 
         self.throttle_code = None
-        self.excite_code = None
+        self.mute_code = None
         if evdev is None:
             self.get_logger().error('python3-evdev is not installed; no Joy-Con input')
         else:
@@ -214,7 +214,7 @@ class JoyconTeleop(Node):
             self.a_code = ecodes.ecodes.get(self.get_parameter('a_button').value)
             self.b_code = ecodes.ecodes.get(self.get_parameter('b_button').value)
             self.r_code = ecodes.ecodes.get(self.get_parameter('autonomy_button').value)
-            self.excite_code = ecodes.ecodes.get(self.get_parameter('excite_button').value)
+            self.mute_code = ecodes.ecodes.get(self.get_parameter('mute_button').value)
             for name, code in (('steer_axis', self.steer_code), ('a_button', self.a_code),
                                ('b_button', self.b_code), ('autonomy_button', self.r_code)):
                 if code is None:
@@ -223,7 +223,7 @@ class JoyconTeleop(Node):
         self.cmd_pub = self.create_publisher(Float32MultiArray, '/drive_cmd', 10)
         self.mode_pub = self.create_publisher(String, '/drive_mode', 10)
         self.progress_pub = self.create_publisher(Float32, '/mode_toggle_progress', 10)
-        self.excite_pub = self.create_publisher(Empty, '/excite', 10)
+        self.mute_pub = self.create_publisher(Empty, '/mute', 10)
         self.create_subscription(AckermannDriveStamped, '/drive', self._on_drive, 10)
 
         self.create_timer(1.0 / float(self.get_parameter('poll_hz').value), self._poll)
@@ -330,8 +330,8 @@ class JoyconTeleop(Node):
                 self.inputs.a = down
             elif ev.code == self.b_code:
                 self.inputs.b = down
-            elif ev.code == self.excite_code and ev.value == 1:     # on the press only, not the hold / release
-                self.excite_pub.publish(Empty())
+            elif ev.code == self.mute_code and ev.value == 1:     # on the press only, not the hold / release
+                self.mute_pub.publish(Empty())
             elif ev.code == self.r_code:
                 if down and not self.btn_auto_down:
                     self.auto_press_t = self._now_s()

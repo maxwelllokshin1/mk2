@@ -81,7 +81,7 @@ joycon_teleop:
 
     # ---- which Joy-Con / evdev names (verify with joycon_probe)
     steer_side: left
-    excite_button: BTN_DPAD_UP  # press = EXCITED face + voice line (same Joy-Con as the buttons below). '' = off
+    mute_button: BTN_DPAD_UP    # press = toggle the speaker mute (top face button, same Joy-Con as the buttons below). '' = off
     steer_axis: ABS_Y           # stick left/right (Joy-Con held sideways)
     throttle_axis: ''           # '' = drive with the buttons below (D-pad down = forward, left = reverse). ABS_X = stick drives instead
     throttle_deadzone: 0.15     # stick must pass this before the motor gets any throttle
@@ -131,7 +131,7 @@ oled_display:
 # (config/expressions/*/<name>/voice/). MAX98357 I2S amps. Rules: pi_drive/expressions.py
 #   parked:   normal, surprised, angry, sarcastic, excited, sleepy, bored     driving:  normal, angry, sarcastic
 #   surprised: about to hit a wall (hazard)    dizzy: collision (hazard)
-#   excited:  lap completed, stopped after a long drive, or the excite button (joycon_teleop excite_button)
+#   excited:  lap completed, stopped after a long drive, or the lap or a long drive (joycon_teleop excite_button)
 # =====================================================================================
 expression:
   ros__parameters:

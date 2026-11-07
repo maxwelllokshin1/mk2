@@ -7,7 +7,7 @@ Inputs:
     /drive_cmd         Float32MultiArray [steer, throttle]  |throttle| > drive_throttle_min = driving
     /person_detected   Bool                                 from person_detector
     /lap_completed     Empty                                from lap_detector      -> EXCITED
-    /excite            Empty                                Joy-Con excite button  -> EXCITED
+    /mute              Empty                                Joy-Con top face button -> toggles the speaker mute
     /surprise          Empty                                from hazard_node       -> SURPRISED (about to hit a wall)
     /collision         Empty                                from hazard_node       -> DIZZY
 Output:
@@ -86,12 +86,14 @@ class ExpressionNode(Node):
         if shutil.which('mpg123') is None and not self.have_ffmpeg:
             self.get_logger().error('no player found: no sound will play')
 
+        self.muted = False
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
         self.expr_pub = self.create_publisher(String, '/expression', latched)
         self.create_subscription(Float32MultiArray, '/drive_cmd', self._on_cmd, 10)
         self.create_subscription(Bool, '/person_detected', self._on_person, 10)
         self.create_subscription(Empty, '/lap_completed', lambda _m: self._excite('lap'), 10)
         self.create_subscription(Empty, '/excite', lambda _m: self._excite('button'), 10)
+        self.create_subscription(Empty, '/mute', lambda _m: self._toggle_mute(), 10)
         self.create_subscription(Empty, '/surprise', lambda _m: self._force('surprised'), 10)
         self.create_subscription(Empty, '/collision', lambda _m: self._force('dizzy'), 10)
         self.closing_pub = self.create_publisher(String, '/expression_closing', 10)
@@ -106,6 +108,12 @@ class ExpressionNode(Node):
     def _on_person(self, msg):
         if msg.data:
             self.last_person = time.monotonic()
+
+    def _toggle_mute(self):
+        self.muted = not self.muted
+        if self.muted:
+            self._stop()                                  # cut the line that is playing
+        self.get_logger().info('speaker MUTED' if self.muted else 'speaker unmuted')
 
     def _excite(self, why):
         self.get_logger().info(f'excited ({why})')
@@ -149,6 +157,8 @@ class ExpressionNode(Node):
                 'sh', path, chain, '' if self.device == 'default' else self.device]
 
     def _say(self, name, interrupt):
+        if self.muted:                                    # faces carry on, just silent
+            return
         files = find_voice_files(self.root, name)         # re-read each time: new voice files need no restart
         if not files:
             self.get_logger().warn(f'no voice lines (.mp3/.m4a/.wav) for {name}', throttle_duration_sec=60.0)

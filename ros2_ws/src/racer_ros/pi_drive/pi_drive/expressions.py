@@ -22,7 +22,7 @@ When each expression can show up:
     driving               normal  angry  sarcastic
     surprised (forced)    about to hit a wall            (hazard_node, /surprise)
     dizzy (forced)        collision                      (hazard_node, /collision)
-    excited (forced)      lap completed, the car stops after excited_after_drive_s of driving, or the excite button
+    excited (forced)      lap completed, or the car stops after excited_after_drive_s of driving
 
 Nothing is scheduled ahead: the expression changes after a random time, and every expression says ONE random voice
 line at a random moment within its first say_window_s seconds (dizzy / surprised / excited speak at once).
