@@ -76,6 +76,7 @@ joycon_teleop:
     auto_min_throttle: 0.12
     auto_throttle: 1.0
     auto_reverse_throttle: 0.25
+    auto_steer_sign: -1.0       # autonomy turned TOWARD a wall on its right: -1.0 flips it. Put 1.0 back if autonomy ever turns the wrong way
     auto_max_steer_rad: 0.52    # = reactive_node max_steering (30 deg)
     auto_timeout_s: 0.5
 

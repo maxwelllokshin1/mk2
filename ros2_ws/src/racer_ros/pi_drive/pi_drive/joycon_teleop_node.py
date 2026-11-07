@@ -69,6 +69,7 @@ class MixerConfig:
     auto_max_throttle: float = 0.25    # THE autonomy speed ceiling: raise as the car proves itself
     auto_min_throttle: float = 0.12    # floor while moving, so slow sections still get past the ESC deadband
     auto_reverse_throttle: float = 0.25
+    auto_steer_sign: float = 1.0       # -1.0 flips autonomy's left/right if the car turns toward what it sees instead of away
     auto_max_steer_rad: float = 0.52   # autonomy steering_angle that equals full lock (reactive_node max_steering = 30 deg)
     auto_speed_deadband: float = 0.05  # |autonomy speed| below this = stop
     auto_timeout_s: float = 0.5        # /drive older than this is treated as missing
@@ -121,7 +122,7 @@ class Mixer:
             if auto_age_s > c.auto_timeout_s:
                 self._shape_steer(0.0, None)
                 return 0.0, 0.0, 'AUTO_WAITING'
-            steering = clamp(auto_steer_rad / c.auto_max_steer_rad, -1.0, 1.0)
+            steering = clamp(c.auto_steer_sign * auto_steer_rad / c.auto_max_steer_rad, -1.0, 1.0)
             self._shape_steer(steering, None)      # back to RC later starts from where autonomy left the wheels
             if auto_speed > c.auto_speed_deadband:
                 if c.auto_speed_ref_mps > 0.0:
@@ -330,7 +331,7 @@ class JoyconTeleop(Node):
 
     # parameters the dashboard may change while the car runs, with their allowed range
     LIVE_RANGES = {'rc_forward': (0.0, 1.0), 'rc_reverse': (0.0, 1.0), 'auto_max_throttle': (0.0, 1.0),
-                   'steer_deadzone': (0.0, 0.9), 'throttle_deadzone': (0.0, 0.9),
+                   'auto_steer_sign': (-1.0, 1.0), 'steer_deadzone': (0.0, 0.9), 'throttle_deadzone': (0.0, 0.9),
                    'steer_rate_min': (0.02, 20.0), 'steer_rate_gain': (0.0, 20.0), 'steer_vel_hold_s': (0.01, 2.0)}
 
     def _on_params(self, params):
