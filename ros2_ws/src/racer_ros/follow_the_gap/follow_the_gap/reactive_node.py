@@ -6,9 +6,14 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import Float32MultiArray, Empty
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import SetParametersResult
-from follow_the_gap.track_geometry import WallTracker, front_speed_factor, wall_steer
 
 class ReactiveFollowGap(Node):
+    # parameters the dashboard can change while the car runs (name == attribute)
+    TUNABLE = ('bubble_radius', 'preprocess_conv_size', 'max_lidar_range', 'speed_max', 'steering_gain',
+               'alpha_straight', 'alpha_curve', 'gap_aim_aggressiveness', 'straight_min_forward_frac',
+               'straight_ema_alpha', 'lap_leave_dist', 'lap_return_dist', 'lap_min_time', 'wheelbase',
+               'lidar_view_every_n', 'recovery_straight_time', 'recovery_clear_dist', 'recovery_max_time')
+
     def __init__(self):
         super().__init__('reactive_node')
         
@@ -47,52 +52,19 @@ class ReactiveFollowGap(Node):
         self.declare_parameter('recovery_clear_dist', 1.0) 
         self.declare_parameter('recovery_max_time', 6.0) 
 
-        # /////// dynamic track-scale adaptation \\\\\\\\
-        self.declare_parameter('enable_dynamic_scaling', True)
-        self.declare_parameter('lidar_hw_range_m', 10.0)
-        self.declare_parameter('reference_corridor_m', 2.0) 
-        self.declare_parameter('min_track_scale', 0.4) 
-        self.declare_parameter('max_track_scale', 1.8) 
-        self.declare_parameter('track_scale_ema_alpha', 0.05) 
-
-        # /////// walls: measured every scan, everything else follows from them
-        self.declare_parameter('center_gain', 0.3)       # 0 = off | how hard it steers toward the middle of the track (1 = full lock at a wall)
-        self.declare_parameter('side_danger_m', 0.25)    # a wall closer than this (reference track) pushes the car away at full lock
-        self.declare_parameter('front_stop_m', 0.35)     # wall dead ahead this close (reference track): crawl speed only
-        self.declare_parameter('front_slow_m', 1.5)      # wall ahead closer than this: slow down, linearly, to the crawl speed at front_stop_m
-        self.declare_parameter('crawl_speed_frac', 0.1)  # crawl speed = this x speed_max (it must keep moving to steer away)
-
         # ////////// get parameters \\\\\\\\\
-        self.bubble_radius_base = self.get_parameter('bubble_radius').value
-        self.bubble_radius = self.bubble_radius_base
+        self.bubble_radius = self.get_parameter('bubble_radius').value
         self.preprocess_conv_size = self.get_parameter('preprocess_conv_size').value
-        self.max_lidar_range_base = self.get_parameter('max_lidar_range').value
-        self.max_lidar_range = self.max_lidar_range_base
-        self.speed_max_base = self.get_parameter('speed_max').value
-        self.speed_max = self.speed_max_base
+        self.max_lidar_range = self.get_parameter('max_lidar_range').value
+        self.speed_max = self.get_parameter('speed_max').value
         self.steering_gain = self.get_parameter('steering_gain').value
         self.current_speed = 0.0
         self.max_steering = np.deg2rad(self.get_parameter('max_steering').value)
         self.alpha_straight = self.get_parameter('alpha_straight').value
         self.alpha_curve = self.get_parameter('alpha_curve').value
-        self.fov_deg_base = self.get_parameter('fov_deg').value
-        self.fov = np.deg2rad(self.fov_deg_base) # how much we want the car to see infront of it
+        self.fov = np.deg2rad(self.get_parameter('fov_deg').value) # how much we want the car to see infront of it
         self.gap_aim_aggressiveness = self.get_parameter('gap_aim_aggressiveness').value
 
-        # dynamic track-scale adaptation
-        self.enable_dynamic_scaling = self.get_parameter('enable_dynamic_scaling').value
-        self.lidar_hw_range_m = self.get_parameter('lidar_hw_range_m').value
-        self.reference_corridor_m = self.get_parameter('reference_corridor_m').value
-        self.min_track_scale = self.get_parameter('min_track_scale').value
-        self.max_track_scale = self.get_parameter('max_track_scale').value
-        self.track_scale_ema_alpha = self.get_parameter('track_scale_ema_alpha').value
-        self.track_scale = None
-        self.walls = WallTracker(alpha=self.track_scale_ema_alpha, open_m=self.lidar_hw_range_m)
-        self.center_gain = self.get_parameter('center_gain').value
-        self.side_danger_base = self.get_parameter('side_danger_m').value
-        self.front_stop_base = self.get_parameter('front_stop_m').value
-        self.front_slow_base = self.get_parameter('front_slow_m').value
-        self.crawl_speed_frac = self.get_parameter('crawl_speed_frac').value
         self.prev_steering = 0.0
         self.steering_smoothing = 0.6
         self.recovery_start_time = None
@@ -105,10 +77,8 @@ class ReactiveFollowGap(Node):
         self.in_straight_mode = False
 
         # lap tracking!!!!!!
-        self.lap_leave_dist_base = self.get_parameter('lap_leave_dist').value
-        self.lap_leave_dist = self.lap_leave_dist_base
-        self.lap_return_dist_base = self.get_parameter('lap_return_dist').value
-        self.lap_return_dist = self.lap_return_dist_base
+        self.lap_leave_dist = self.get_parameter('lap_leave_dist').value
+        self.lap_return_dist = self.get_parameter('lap_return_dist').value
         self.lap_min_time = self.get_parameter('lap_min_time').value
         self.start_pos = None
         self.has_left_start = False
@@ -124,8 +94,7 @@ class ReactiveFollowGap(Node):
 
         # recovery
         self.recovery_straight_time = self.get_parameter('recovery_straight_time').value
-        self.recovery_clear_dist_base = self.get_parameter('recovery_clear_dist').value
-        self.recovery_clear_dist = self.recovery_clear_dist_base
+        self.recovery_clear_dist = self.get_parameter('recovery_clear_dist').value
         self.recovery_max_time = self.get_parameter('recovery_max_time').value
         self.recovery_steering = 0.0
         
@@ -232,137 +201,17 @@ class ReactiveFollowGap(Node):
         self.lap_start_time = self.get_clock().now()
         self.last_lap_time = 0.0
         self.best_lap_time = None
-        self.track_scale = None
-        self.walls.reset()
         self.get_logger().info('State reset (dashboard restart)')
 
-    def on_parameter_update(self, params): # everything that is updated with my param tuner dashboard
+    def on_parameter_update(self, params): # keeps the attributes read every scan in sync with the dashboard tuner
         for p in params:
             name, value = p.name, p.value
-            if name == 'bubble_radius':
-                self.bubble_radius_base = value
-                if not self.enable_dynamic_scaling:
-                    self.bubble_radius = value
-            elif name == 'preprocess_conv_size':
-                self.preprocess_conv_size = value
-            elif name == 'max_lidar_range':
-                self.max_lidar_range_base = value
-                if not self.enable_dynamic_scaling:
-                    self.max_lidar_range = value
-            elif name == 'speed_max':
-                self.speed_max_base = value
-                if not self.enable_dynamic_scaling:
-                    self.speed_max = value
-            elif name == 'steering_gain':
-                self.steering_gain = value
-            elif name == 'max_steering':
-                self.max_steering = np.deg2rad(value)
-            elif name == 'alpha_straight':
-                self.alpha_straight = value
-            elif name == 'alpha_curve':
-                self.alpha_curve = value
-            elif name == 'fov_deg':
-                self.fov_deg_base = value
-                if not self.enable_dynamic_scaling:
-                    self.fov = np.deg2rad(value)
-            elif name == 'gap_aim_aggressiveness':
-                self.gap_aim_aggressiveness = value
-            elif name == 'straight_min_forward_frac':
-                self.straight_min_forward_frac = value
-            elif name == 'straight_max_angle_deg':
-                self.straight_max_angle = np.deg2rad(value)
-            elif name == 'straight_ema_alpha':
-                self.straight_ema_alpha = value
-            elif name == 'lap_leave_dist':
-                self.lap_leave_dist_base = value
-                if not self.enable_dynamic_scaling:
-                    self.lap_leave_dist = value
-            elif name == 'lap_return_dist':
-                self.lap_return_dist_base = value
-                if not self.enable_dynamic_scaling:
-                    self.lap_return_dist = value
-            elif name == 'lap_min_time':
-                self.lap_min_time = value
-            elif name == 'wheelbase':
-                self.wheelbase = value
-            elif name == 'lidar_view_every_n':
-                self.lidar_view_every_n = value
-            elif name == 'recovery_straight_time':
-                self.recovery_straight_time = value
-            elif name == 'recovery_clear_dist':
-                self.recovery_clear_dist_base = value
-                if not self.enable_dynamic_scaling:
-                    self.recovery_clear_dist = value
-            elif name == 'recovery_max_time':
-                self.recovery_max_time = value
-            elif name == 'enable_dynamic_scaling':
-                self.enable_dynamic_scaling = value
-                if not value:
-                    self.bubble_radius = self.bubble_radius_base
-                    self.max_lidar_range = self.max_lidar_range_base
-                    self.speed_max = self.speed_max_base
-                    self.fov = np.deg2rad(self.fov_deg_base)
-                    self.recovery_clear_dist = self.recovery_clear_dist_base
-                    self.lap_leave_dist = self.lap_leave_dist_base
-                    self.lap_return_dist = self.lap_return_dist_base
-            elif name == 'lidar_hw_range_m':
-                self.lidar_hw_range_m = value
-            elif name == 'reference_corridor_m':
-                self.reference_corridor_m = value
-            elif name == 'min_track_scale':
-                self.min_track_scale = value
-            elif name == 'max_track_scale':
-                self.max_track_scale = value
-            elif name == 'track_scale_ema_alpha':
-                self.track_scale_ema_alpha = value
-                self.walls.alpha = value
-            elif name == 'center_gain':
-                self.center_gain = value
-            elif name == 'side_danger_m':
-                self.side_danger_base = value
-            elif name == 'front_stop_m':
-                self.front_stop_base = value
-            elif name == 'front_slow_m':
-                self.front_slow_base = value
-            elif name == 'crawl_speed_frac':
-                self.crawl_speed_frac = value
+            if name in ('max_steering', 'straight_max_angle_deg', 'fov_deg'):
+                attr = {'max_steering': 'max_steering', 'straight_max_angle_deg': 'straight_max_angle', 'fov_deg': 'fov'}[name]
+                setattr(self, attr, np.deg2rad(value))           # stored in radians
+            elif name in self.TUNABLE:
+                setattr(self, name, value)
         return SetParametersResult(successful=True)
-
-    def _update_walls(self, data):
-        """Every scan: the sideways distance to the left and right wall."""
-        angles = data.angle_min + np.arange(len(data.ranges)) * data.angle_increment
-        self.walls.open_m = self.lidar_hw_range_m
-        self.walls.update(angles, np.asarray(data.ranges, dtype=float))
-
-    def _update_dynamic_scaling(self, data): # retunes values based on how wide the track is, measured at the walls
-        self._update_walls(data)
-        if not self.enable_dynamic_scaling or not self.walls.known:
-            return
-
-        corridor_m = float(self.walls.corridor) # left wall + right wall, sideways
-        if corridor_m < 0.2: # check for sensor glitch
-            return
-
-        raw_scale = float(np.clip(corridor_m / self.reference_corridor_m,
-                                   self.min_track_scale, self.max_track_scale)) # this is how much to scale raw
-        self.track_scale = raw_scale # the wall distances are already smoothed (track_scale_ema_alpha)
-
-        # now finally update lidar range, bubble radius, fov, speed, recovery distance, and lap tracking
-        scale = self.track_scale
-        self.max_lidar_range = float(np.clip(self.max_lidar_range_base * scale, 1.0, self.lidar_hw_range_m))
-        self.bubble_radius = float(np.clip(self.bubble_radius_base * scale, 0.1, 1.5))
-        self.bubble_radius = float(min(self.bubble_radius, max(0.08, 0.5 * min(self.walls.left, self.walls.right))))  # never wider than half the gap to the nearer wall
-        self.fov = float(np.deg2rad(np.clip(self.fov_deg_base * scale, 30.0, 90.0)))
-        self.speed_max = float(np.clip(self.speed_max_base * scale, 0.3, self.speed_max_base * self.max_track_scale))
-        self.recovery_clear_dist = float(np.clip(self.recovery_clear_dist_base * scale, 0.3, 2.0))
-        self.lap_leave_dist = float(np.clip(self.lap_leave_dist_base * scale, 0.5, 20.0))
-        self.lap_return_dist = float(np.clip(self.lap_return_dist_base * scale, 0.3, 10.0))
-
-        self.get_logger().info(
-            f'[walls] left {self.walls.left:.2f}m right {self.walls.right:.2f}m corridor {corridor_m:.2f}m scale={scale:.2f} | '
-            f'bubble={self.bubble_radius:.2f}m range={self.max_lidar_range:.2f}m '
-            f'fov={np.rad2deg(self.fov):.0f}deg speed_max={self.speed_max:.2f}m/s',
-            throttle_duration_sec=2.0)
 
     def preprocess_lidar(self, ranges): # this is to predict what is ahead of you
         # preprocess the lidar scan array
@@ -419,11 +268,6 @@ class ReactiveFollowGap(Node):
         data = self._normalize_scan(data)
         ranges = np.array(data.ranges)
         # ------------------------ {PROCESSING} ------------------------
-
-        # Re-tune bubble_radius / max_lidar_range / fov / speed_max /
-        # recovery_clear_dist / lap_leave_dist / lap_return_dist for the
-        # track we're actually on, BEFORE anything below reads them.
-        self._update_dynamic_scaling(data)
 
         # step 1: preprocess
         processed_ranges = self.preprocess_lidar(ranges) # we want the values to be between 0 and self.max_lidar_range. 
@@ -495,13 +339,6 @@ class ReactiveFollowGap(Node):
         # steering gain
         steering_angle = gain * angle_to_best
 
-        # walls: measured this scan. Stay off the nearer one, drift toward the middle (not in bends: unequal sides are normal there)
-        scale = self.track_scale if (self.enable_dynamic_scaling and self.track_scale) else 1.0
-        if self.walls.known and self.center_gain > 0:
-            steering_angle += wall_steer(
-                self.walls.left, self.walls.right, self.walls.corridor / 2.0, self.max_steering,
-                self.center_gain, self.side_danger_base * scale, curve_frac=angle_frac)
-        
         # clamp the steering angle to not go out of bounds
         steering_angle = np.clip(steering_angle, -self.max_steering, self.max_steering)
         
@@ -558,11 +395,6 @@ class ReactiveFollowGap(Node):
         reactive_speed = self.speed_max * (np.cos(steering_angle)**4) * distance_factor # we want to lower the speed based on how close the object infront of us is
         speed = reactive_speed + (self.speed_max - reactive_speed) * openness
 
-        # wall ahead: brake in proportion to how close it is, whatever the gap logic says (never fully stop: it has to steer away)
-        crawl = self.crawl_speed_frac * self.speed_max
-        speed = max(crawl, speed * front_speed_factor(
-            float(min_forward), self.front_stop_base * scale, self.front_slow_base * scale))
-        speed = min(speed, self.speed_max)
 
         steering_delta = steering_angle - old_steering
 

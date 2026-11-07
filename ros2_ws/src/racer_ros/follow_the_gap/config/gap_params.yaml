@@ -1,12 +1,5 @@
 reactive_node:
   ros__parameters:
-    # NOTE: bubble_radius, max_lidar_range, speed_max, fov_deg,
-    # recovery_clear_dist, lap_leave_dist and lap_return_dist are no longer
-    # fixed absolutes — they're the REFERENCE values for a track whose
-    # corridors are reference_corridor_m wide (see the "dynamic track-scale
-    # adaptation" block below). Tune them as if for a medium-size track; a
-    # smaller/tighter track shrinks all of them together at runtime, a
-    # bigger/more open one grows them, both within min/max_track_scale.
     bubble_radius: 0.3 # safety zone drawn around closest obstacle lidar sees, car treats as blocked off
 
     preprocess_conv_size: 3 # fixed the code typo that made this a no-op (was "preporcess_conv_size") — now it actually sets the lidar smoothing window size
@@ -39,17 +32,3 @@ reactive_node:
     recovery_straight_time: 0.8
     recovery_clear_dist: 1.0
     recovery_max_time: 6.0
-
-    enable_dynamic_scaling: true
-    lidar_hw_range_m: 10.0        # your lidar's real max reliable range (Hokuyo UST-10LX ~10m, RPLIDAR A1M8 ~12m, ~8m is more reliable indoors); only clips the measurement, never the driving values
-    reference_corridor_m: 2.0     # corridor width (m) the values above were tuned for — measure your usual test track
-    min_track_scale: 0.4          # floor: how much a tiny track can shrink everything
-    max_track_scale: 1.8          # ceiling: how much a huge track can grow everything — lower this before a real (non-sim) speed_max test, see mcu_bridge's own hard speed clamp too
-    track_scale_ema_alpha: 0.3    # smoothing of the measured left / right wall distances (1.0 = raw every scan, lower = steadier but slower)
-
-    # walls, measured sideways on every scan (see track_geometry.py); bubble / range / fov / speed above scale with them
-    center_gain: 0.3              # steers toward the middle of the track. 0 = off, 1 = full lock at a wall
-    side_danger_m: 0.25           # a wall closer than this pushes the car away at full lock (reference track, scales with it)
-    front_stop_m: 0.35            # wall straight ahead closer than this: crawl speed only
-    front_slow_m: 1.5             # wall ahead closer than this: slows down linearly
-    crawl_speed_frac: 0.1         # crawl speed = this x speed_max
